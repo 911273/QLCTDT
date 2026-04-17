@@ -430,6 +430,186 @@ class Database:
                     )
                 current_v = v_target
 
+        # Giai đoạn 11: migrate_v2 theo yêu cầu đặc thù
+        self.migrate_v2()
+
+    def migrate_v2(self):
+        """
+        Refactor Database theo chuẩn mới: Bổ sung bảng và cột cho ĐCCTHP.
+        Không xóa bảng cũ, chỉ thêm mới hoặc nâng cấp.
+        """
+        print("Running migrate_v2 (Phase 11 requested refactor)...")
+        try:
+            with self.transaction():
+                # 1. Bổ sung cột cho bảng hoc_phan (HocPhan)
+                cols_to_add = [
+                    ('ma_hp', 'TEXT'),
+                    ('don_vi_ql', 'TEXT'),
+                    ('loai_hp', 'TEXT'),
+                    ('loai_hinh', 'TEXT'),
+                    ('hp_song_hanh', 'TEXT')
+                ]
+                existing_cols = [c['name'] for c in self.conn.execute("PRAGMA table_info(hoc_phan)").fetchall()]
+                for col_name, col_type in cols_to_add:
+                    if col_name not in existing_cols:
+                        self.conn.execute(f"ALTER TABLE hoc_phan ADD COLUMN {col_name} {col_type}")
+                
+                # 2. Bảng GiangVien_HP
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS GiangVien_HP (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        gv_id INTEGER,
+                        vai_tro TEXT,
+                        thu_tu INTEGER,
+                        FOREIGN KEY(ma_hp) REFERENCES hoc_phan(ma)
+                    )
+                """)
+
+                # 3. Bảng MucTieu_HP
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS MucTieu_HP (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        ma_mt TEXT,
+                        mo_ta TEXT,
+                        plo_id INTEGER,
+                        thu_tu INTEGER
+                    )
+                """)
+
+                # 4. Bảng CLO (Mẫu chuẩn)
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS CLO_Standard (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        ma_clo TEXT,
+                        mo_ta TEXT,
+                        plo_id INTEGER,
+                        muc_giang_day TEXT,
+                        thu_tu INTEGER
+                    )
+                """)
+
+                # 5. Bảng TaiLieu (Mẫu chuẩn)
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS TaiLieu_Standard (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        loai TEXT,
+                        thu_tu INTEGER,
+                        tac_gia TEXT,
+                        nam_xb TEXT,
+                        ten_tl TEXT,
+                        nxb TEXT,
+                        link TEXT
+                    )
+                """)
+
+                # 6. Bảng NoiDung_LT
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS NoiDung_LT (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        stt INTEGER,
+                        tieu_de TEXT,
+                        gio_lt INTEGER DEFAULT 0,
+                        gio_bt INTEGER DEFAULT 0,
+                        gio_th_tn INTEGER DEFAULT 0,
+                        hoat_dong_day TEXT,
+                        hoat_dong_hoc TEXT,
+                        clo_ids TEXT,
+                        bai_dg_ma TEXT,
+                        tai_lieu_ref TEXT,
+                        is_header INTEGER DEFAULT 0,
+                        parent_id INTEGER
+                    )
+                """)
+
+                # 7. Bảng NoiDung_TH
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS NoiDung_TH (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        stt INTEGER,
+                        ten_bai TEXT,
+                        gio_lt INTEGER DEFAULT 0,
+                        gio_bt INTEGER DEFAULT 0,
+                        gio_th_tn INTEGER DEFAULT 0,
+                        hoat_dong_day TEXT,
+                        hoat_dong_hoc TEXT,
+                        clo_ids TEXT,
+                        bai_dg_ma TEXT
+                    )
+                """)
+
+                # 8. Bảng BaiDanhGia
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS BaiDanhGia (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        ma_bdg TEXT,
+                        ten TEXT,
+                        hinh_thuc TEXT,
+                        trong_so REAL,
+                        loai_bieu TEXT
+                    )
+                """)
+
+                # 9. Bảng BaiDanhGia_CLO
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS BaiDanhGia_CLO (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        bdg_id INTEGER,
+                        clo_id INTEGER,
+                        diem_toida REAL,
+                        trong_so_cr REAL
+                    )
+                """)
+
+                # 10. Bảng Rubric
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS Rubric (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        ma_rubric TEXT,
+                        ten TEXT,
+                        clo_id INTEGER,
+                        bdg_id INTEGER
+                    )
+                """)
+
+                # 11. Bảng Rubric_TieuChi
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS Rubric_TieuChi (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        rubric_id INTEGER,
+                        tieu_chi TEXT,
+                        trong_so REAL,
+                        xuat_sac TEXT,
+                        tot TEXT,
+                        dat TEXT,
+                        chua_dat TEXT,
+                        thu_tu INTEGER
+                    )
+                """)
+
+                # 12. Bảng LichSu_CapNhat (Chuẩn mới)
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS LichSu_CapNhat_Standard (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        ma_hp TEXT,
+                        lan INTEGER,
+                        noi_dung TEXT,
+                        ngay TEXT,
+                        nguoi_cap_nhat TEXT
+                    )
+                """)
+                
+                print("migrate_v2 completed successfully.")
+        except Exception as e:
+            print(f"Error in migrate_v2: {e}")
+
     def _migration_v2(self):
         """Thêm UNIQUE INDEX cho hoc_phan.ma and cleanup duplicates if any."""
         # 1. Kiểm tra xem có trùng mã không

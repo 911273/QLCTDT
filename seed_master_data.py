@@ -1,6 +1,6 @@
-# seed_master_data.py
 from db import Database
 import os
+import json
 
 def seed():
     db = Database()
@@ -115,10 +115,15 @@ def seed():
     ]
     hp_map = {}
     for ma, ten, tc, lt, th, kma, nganh, cn, khoi in hps:
-        hp_id = db.add_hoc_phan({
-            'ma': ma, 'ten_viet': ten, 'so_tin_chi': tc,
-            'gio_lt': lt, 'gio_th_tn': th, 'khoa_id': khoa_map[kma]
-        })
+        # Check if exists
+        check = db.conn.execute("SELECT id FROM hoc_phan WHERE ma=?", (ma,)).fetchone()
+        if check:
+            hp_id = check['id']
+        else:
+            hp_id = db.add_hoc_phan({
+                'ma': ma, 'ten_viet': ten, 'so_tin_chi': tc,
+                'gio_lt': lt, 'gio_th_tn': th, 'khoa_id': khoa_map[kma]
+            })
         hp_map[ma] = hp_id
 
     # 5. CHƯƠNG TRÌNH ĐÀO TẠO (CTĐT)
@@ -155,16 +160,35 @@ def seed():
         if ma_hp in hp_map:
             db.set_hoc_lieu(hp_map[ma_hp], [{'loai': 'chinh', 'so_thu_tu': 1, 'noi_dung': f"{ten} - {tac_gia}", 'tai_lieu_id': tl_id}])
 
-    # 6. PHÂN CÔNG GIẢNG DẠY (SAMPLES)
-    # TS Nguyễn Quốc Uy dạy các môn chuyên ngành
-    uy_môn = ['004836', '000885', '001477', '002575', '003773']
-    for ma in uy_môn:
-        if ma in hp_map:
-            db.set_gv_of_hp(hp_map[ma], [{'gv_id': gv_map['Nguyễn Quốc Uy'], 'vai_tro': 'chinh', 'thu_tu': 1}])
+    # 7. CDIO PLOs (Standard 1-10)
+    plo_cdio = [
+        ('PLO1', 'Kiến thức kỹ thuật và lập luận chuyên ngành'),
+        ('PLO2', 'Kỹ năng và phẩm chất cá nhân và chuyên môn'),
+        ('PLO3', 'Kỹ năng và phẩm chất giữa các cá nhân: làm việc nhóm và giao tiếp'),
+        ('PLO4', 'Quan niệm, Thiết kế, Triển khai và Vận hành trong bối cảnh doanh nghiệp và xã hội'),
+        ('PLO5', 'Kỹ năng lập kế hoạch và tư duy chiến lược'),
+        ('PLO6', 'Kỹ năng giải quyết vấn đề sáng tạo'),
+        ('PLO7', 'Sử dụng công cụ kỹ thuật hiện đại'),
+        ('PLO8', 'Đạo đức nghề nghiệp và trách nhiệm xã hội'),
+        ('PLO9', 'Khả năng học tập suốt đời'),
+        ('PLO10', 'Năng lực lãnh đạo và quản lý dự án')
+    ]
+    for ma, mo_ta in plo_cdio:
+        db.add_cdr_ctdt(ma, mo_ta)
 
-            db.set_gv_of_hp(hp_map[ma], [{'gv_id': gv_map['Nguyễn Quốc Uy'], 'vai_tro': 'chinh', 'thu_tu': 1}])
+    # 8. Bloom Verbs & IRM Levels (Stored in config for UI)
+    bloom_verbs = {
+        'L1_Nho': 'Liệt kê, nhắc lại, mô tả, nhận biết, định nghĩa',
+        'L2_Hieu': 'Giải thích, minh họa, phân loại, so sánh, bản thảo',
+        'L3_VanDung': 'Tính toán, thực hiện, giải quyết, vận dụng, xây dựng',
+        'L4_PhanTich': 'Phân tích, kiểm tra, chứng minh, phân biệt, tổ chức',
+        'L5_DanhGia': 'Đánh giá, phê bình, kết luận, dự báo, lập luận',
+        'L6_SangTao': 'Thiết kế, lập kế hoạch, sáng tạo, phát triển, thiết lập'
+    }
+    db.set_config('bloom_verbs', json.dumps(bloom_verbs, ensure_ascii=False))
+    db.set_config('irm_levels', 'I (Introduce), R (Reinforce), M (Master)')
 
-    print("Success: Master data seeded with CTDT mappings.")
+    print("Success: Master data seeded with CTDT mappings, CDIO PLOs and Bloom/IRM config.")
 
 if __name__ == "__main__":
     seed()
