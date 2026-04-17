@@ -951,7 +951,7 @@ class _PloManagerDialog(tb.Toplevel):
         if not id: return
         
         if type == 'plo':
-            item = next(r for r in self._plo_items if r['id'] == id)
+            item = dict(next(r for r in self._plo_items if r['id'] == id))
             title = 'Sửa PLO'
             fields = [('ma', 'Mã PLO', 'entry', {}), ('mo_ta', 'Mô tả', 'text', {})]
         else:

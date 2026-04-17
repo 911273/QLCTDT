@@ -130,13 +130,14 @@ class Sec1ThongTin(BaseSection):
 
         gv_bf = tb.Frame(gv_lf)
         gv_bf.pack(fill='x', pady=(4, 0))
-        tb.Button(gv_bf, text='➕ Thêm GV',  command=self._gv_add, bootstyle='success-outline').pack(side='left', padx=2)
+        tb.Button(gv_bf, text='➕ Thêm mới GV',  command=self._gv_add, bootstyle='success-outline').pack(side='left', padx=2)
+        tb.Button(gv_bf, text='👥 Chọn từ Danh sách',
+                   command=self._gv_pick, bootstyle='primary-outline').pack(side='left', padx=2)
+        tb.Separator(gv_bf, orient='vertical').pack(side='left', padx=6, fill='y')
         tb.Button(gv_bf, text='✏ Sửa',       command=self._gv_edit, bootstyle='info-outline').pack(side='left', padx=2)
         tb.Button(gv_bf, text='🗑 Xóa',       command=self._gv_delete, bootstyle='danger-outline').pack(side='left', padx=2)
         tb.Button(gv_bf, text='⬆ Lên',       command=lambda: self._gv_move(-1)).pack(side='left', padx=2)
         tb.Button(gv_bf, text='⬇ Xuống',     command=lambda: self._gv_move(1)).pack(side='left', padx=2)
-        tb.Button(gv_bf, text='👥 Chọn từ Danh sách',
-                   command=self._gv_pick, bootstyle='outline-secondary').pack(side='right', padx=2)
         r += 1
 
         # ── Thông tin học phần ───────────────────────────────────────────────
@@ -467,7 +468,7 @@ class Sec1ThongTin(BaseSection):
 
     def _gv_fields(self, initial=None):
         return [
-            ('ho_ten',  'Họ và tên',      'entry', {}),
+            ('ho_ten',  'Họ và tên',      'entry_with_btn', {'btn_text': '👥 Chọn', 'btn_cmd_key': 'pick_gv'}),
             ('hoc_vi',  'Học hàm, học vị', 'entry', {}),
             ('don_vi',  'Đơn vị công tác', 'entry', {}),
             ('sdt',     'Số điện thoại',  'entry', {}),
@@ -544,16 +545,17 @@ class Sec1ThongTin(BaseSection):
         dlg = _GvPickDialog(self, all_gvs)
         if dlg.result:
             self.gv_tree.snapshot()
-            gv = dlg.result
             vai_tro = dlg.vai_tro
-            self._gv_rows.append({'gv_id': gv['id'],
-                                   'ho_ten': gv['ho_ten'],
-                                   'hoc_vi': gv['hoc_vi'] or '',
-                                   'don_vi': gv.get('don_vi') or '',
-                                   'sdt': gv['sdt'] or '',
-                                   'email': gv['email'] or '',
-                                   'vai_tro': vai_tro,
-                                   'thu_tu': len(self._gv_rows)+1})
+            for gv_raw in dlg.result:
+                gv = dict(gv_raw) if not isinstance(gv_raw, dict) else gv_raw
+                self._gv_rows.append({'gv_id': gv.get('id'),
+                                       'ho_ten': gv.get('ho_ten', ''),
+                                       'hoc_vi': gv.get('hoc_vi') or '',
+                                       'don_vi': gv.get('don_vi') or '',
+                                       'sdt': gv.get('sdt') or '',
+                                       'email': gv.get('email') or '',
+                                       'vai_tro': vai_tro,
+                                       'thu_tu': len(self._gv_rows)+1})
             self._gv_refresh()
             self.mark_modified()
 
@@ -566,6 +568,31 @@ class Sec1ThongTin(BaseSection):
             except:
                 res[k] = 0.0
         return res
+
+    def _pick_gv(self, var, dialog=None):
+        """Mở _GvPickDialog để chọn GV và điền vào form."""
+        all_gvs = self.db.get_all_giang_vien()
+        if not all_gvs:
+            messagebox.showinfo('Thông báo', 'Chưa có giảng viên nào trong pool.', parent=dialog or self)
+            return
+            
+        dlg = _GvPickDialog(self, all_gvs)
+        if dlg.result:
+            # Lấy GV đầu tiên được chọn
+            gv_raw = dlg.result[0]
+            gv = dict(gv_raw) if not isinstance(gv_raw, dict) else gv_raw
+            var.set(gv.get('ho_ten', ''))
+            
+            # Nếu được gọi từ RowEditDialog, điền thêm các field khác
+            if dialog and hasattr(dialog, '_vars'):
+                d_vars = dialog._vars
+                if 'hoc_vi' in d_vars: d_vars['hoc_vi'].set(gv.get('hoc_vi') or '')
+                if 'don_vi' in d_vars: d_vars['don_vi'].set(gv.get('don_vi') or '')
+                if 'sdt' in d_vars: d_vars['sdt'].set(gv.get('sdt') or '')
+                if 'email' in d_vars: d_vars['email'].set(gv.get('email') or '')
+                
+                vrl = dlg.v_vaitro.get()
+                if 'vai_tro' in d_vars: d_vars['vai_tro'].set(vrl)
 
 
 class _AddCtdtToHpDialog(tb.Toplevel):
@@ -653,6 +680,7 @@ class _GvPickDialog(tb.Toplevel):
         heads = ('Họ và tên', 'Học vị', 'SĐT', 'Email')
         widths = (200, 100, 110, 200)
         tf, self.tree = make_tree(frm, cols, heads, widths, height=10, db=self.db, table_id='sec1_gv_pick')
+        self.tree.configure(selectmode='extended')
         tf.pack(fill='both', expand=True)
 
         self._all = gv_list
@@ -692,8 +720,13 @@ class _GvPickDialog(tb.Toplevel):
         if not sel:
             messagebox.showwarning('Cảnh báo', 'Chưa chọn giảng viên.', parent=self)
             return
-        idx = int(sel[0])
-        self.result = self._shown[idx]
+        
+        selected_data = []
+        for iid in sel:
+            idx = int(iid)
+            selected_data.append(self._shown[idx])
+            
+        self.result = selected_data
         vrl = self.v_vaitro.get()
         self.vai_tro = 'chinh' if 'chính' in vrl else 'tham_gia'
         self.destroy()

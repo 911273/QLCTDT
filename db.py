@@ -338,7 +338,7 @@ class Database:
         self.db_path = db_path or DB_PATH
         self.conn = None
         self.conn = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._connect()
         self._create_tables()
         self._run_migrations()
@@ -369,25 +369,38 @@ class Database:
         # Bật chế độ WAL để hỗ trợ đọc/ghi đồng thời tốt hơn
         try:
             self.conn.execute("PRAGMA journal_mode = WAL")
+            self.conn.execute("PRAGMA synchronous = NORMAL")
+            self.conn.execute("PRAGMA cache_size = -64000") # 64MB cache
+            self.conn.execute("PRAGMA temp_store = MEMORY")
         except sqlite3.OperationalError:
             pass
 
     @contextmanager
     def transaction(self):
-        """Context manager cho việc thực hiện các thao tác trong 1 transaction."""
+        """Context manager cho việc thực hiện các thao tác trong 1 transaction.
+        Hỗ trợ nested transaction bằng SAVEPOINT.
+        """
+        import time
         with self._lock:
-            try:
-                # Kiểm tra if already in transaction (sqlite3 doesn't support nested transactions well)
-                # but we can check if autocommit is off.
-                if self.conn.in_transaction:
+            # Nếu đang trong transaction, dùng SAVEPOINT
+            if self.conn.in_transaction:
+                sp_id = str(int(time.time() * 1000))[-6:]
+                sp_name = f"nested_sp_{sp_id}"
+                self.conn.execute(f"SAVEPOINT {sp_name}")
+                try:
                     yield self.conn
-                else:
+                    self.conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                except Exception as e:
+                    self.conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                    raise e
+            else:
+                try:
                     self.conn.execute("BEGIN TRANSACTION")
                     yield self.conn
-                
-            except Exception as e:
-                self.conn.rollback()
-                raise e
+                    self.conn.commit()
+                except Exception as e:
+                    self.conn.rollback()
+                    raise e
 
     def _get_schema_version(self):
         row = self.conn.execute("SELECT version FROM schema_version WHERE id=1").fetchone()
@@ -455,16 +468,36 @@ class Database:
                         self.conn.execute(f"ALTER TABLE hoc_phan ADD COLUMN {col_name} {col_type}")
                 
                 # 2. Bảng GiangVien_HP
+                # Fix for FK mismatch: Remove FOREIGN KEY(ma_hp) REFERENCES hoc_phan(ma)
+                # because hoc_phan(ma) is not a unique constraint (it's a partial index).
                 self.conn.execute("""
                     CREATE TABLE IF NOT EXISTS GiangVien_HP (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         ma_hp TEXT,
                         gv_id INTEGER,
                         vai_tro TEXT,
-                        thu_tu INTEGER,
-                        FOREIGN KEY(ma_hp) REFERENCES hoc_phan(ma)
+                        thu_tu INTEGER
                     )
                 """)
+                # Corrective step for existing tables with the broken FK
+                try:
+                    fk_list = self.conn.execute("PRAGMA foreign_key_list(GiangVien_HP)").fetchall()
+                    if any(fk['table'] == 'hoc_phan' and fk['to'] == 'ma' for fk in fk_list):
+                        print("Fixing GiangVien_HP foreign key mismatch...")
+                        self.conn.execute("ALTER TABLE GiangVien_HP RENAME TO GiangVien_HP_fix")
+                        self.conn.execute("""
+                            CREATE TABLE GiangVien_HP (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                ma_hp TEXT,
+                                gv_id INTEGER,
+                                vai_tro TEXT,
+                                thu_tu INTEGER
+                            )
+                        """)
+                        self.conn.execute("INSERT INTO GiangVien_HP (id, ma_hp, gv_id, vai_tro, thu_tu) SELECT id, ma_hp, gv_id, vai_tro, thu_tu FROM GiangVien_HP_fix")
+                        self.conn.execute("DROP TABLE GiangVien_HP_fix")
+                except Exception as e:
+                    print(f"Warning fixing GiangVien_HP: {e}")
 
                 # 3. Bảng MucTieu_HP
                 self.conn.execute("""
@@ -963,7 +996,13 @@ class Database:
                     (hp_id, item.get('so_thu_tu'), item.get('mo_ta'), item.get('cdr_ma'),
                      item.get('nhom'), item.get('la_tieu_de_nhom', 0))
                 )
-        
+    def add_muc_tieu(self, hp_id, data):
+        with self.transaction():
+            self.conn.execute(
+                "INSERT INTO muc_tieu(hp_id,so_thu_tu,mo_ta,cdr_ma,nhom,la_tieu_de_nhom) VALUES(?,?,?,?,?,?)",
+                (hp_id, data.get('so_thu_tu'), data.get('mo_ta'), data.get('cdr_ma'),
+                 data.get('nhom'), data.get('la_tieu_de_nhom', 0))
+            )
 
     # ------------------------------------------------------------------ CLO
     def get_clo(self, hp_id):
@@ -980,6 +1019,13 @@ class Database:
                     (hp_id, item.get('ma'), item.get('mo_ta'), item.get('cdr_ma'),
                      item.get('level_irm'), item.get('nhom'), item.get('la_tieu_de_nhom', 0))
                 )
+
+    def add_lich_su_cap_nhat(self, hp_id, data):
+        with self.transaction():
+            self.conn.execute(
+                "INSERT INTO lich_su_cap_nhat(hp_id,lan,noi_dung,nguoi_cap_nhat,ngay_cap_nhat) VALUES(?,?,?,?,?)",
+                (hp_id, data.get('lan'), data.get('noi_dung'), data.get('nguoi_cap_nhat'), data.get('ngay_cap_nhat'))
+            )
         
 
     # --------------------------------------------------------------- HOC LIEU

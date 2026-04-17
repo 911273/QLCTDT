@@ -8,7 +8,73 @@ from utils.ui_utils import (show_modern_info, show_modern_warning,
 from utils.auto_fill import get_suggested_nhiem_vu, get_suggested_assessment
 
 
+class CLOPickerDialog(tb.Toplevel):
+    """Popup checkbox chọn nhiều CLO từ danh sách thực tế của HP."""
+    
+    def __init__(self, parent, db, hp_id, current_selected=''):
+        super().__init__(parent)
+        self.title('Chọn CĐR liên quan')
+        self.resizable(False, False)
+        self.result = None
+        
+        self._vars = {}
+        clo_list = db.get_clo(hp_id) if hp_id else []
+        selected_codes = [c.strip() for c in current_selected.split(',') if c.strip()]
+        
+        tb.Label(self, text='Chọn các CĐR (CLO) liên quan:',
+                 font=('Arial', 10, 'bold')).pack(anchor='w', padx=16, pady=(12, 4))
+        
+        frm = ScrollableFrame(self) if len(clo_list) > 8 else tb.Frame(self)
+        frm.pack(fill='both', expand=True, padx=16)
+        inner = frm.inner if hasattr(frm, 'inner') else frm
+        
+        if not clo_list:
+            tb.Label(inner, text='⚠ Chưa có CLO nào. Vui lòng điền Tab 4 trước.',
+                     bootstyle='warning').pack(pady=8)
+        
+        for clo in clo_list:
+            ma = clo['ma_clo']
+            var = tk.BooleanVar(value=(ma in selected_codes))
+            self._vars[ma] = var
+            chk = tb.Checkbutton(
+                inner,
+                text=f"[{ma}] {clo.get('mo_ta', '')[:60]}{'...' if len(clo.get('mo_ta','')) > 60 else ''}",
+                variable=var,
+                bootstyle='primary'
+            )
+            chk.pack(anchor='w', pady=2)
+        
+        # Nút
+        btn_frm = tb.Frame(self)
+        btn_frm.pack(fill='x', padx=16, pady=12)
+        tb.Button(btn_frm, text='✅ Xác nhận', bootstyle='primary',
+                  command=self._confirm).pack(side='left', padx=4)
+        tb.Button(btn_frm, text='Chọn tất cả',
+                  command=self._select_all).pack(side='left', padx=4)
+        tb.Button(btn_frm, text='Bỏ chọn', bootstyle='outline-secondary',
+                  command=self._deselect_all).pack(side='left', padx=4)
+        tb.Button(btn_frm, text='✖ Hủy', bootstyle='outline-danger',
+                  command=self.destroy).pack(side='right', padx=4)
+        
+        self.transient(parent)
+        self.grab_set()
+        self.wait_window()
+    
+    def _confirm(self):
+        self.result = ', '.join(ma for ma, var in self._vars.items() if var.get())
+        self.destroy()
+    
+    def _select_all(self):
+        for var in self._vars.values(): var.set(True)
+    
+    def _deselect_all(self):
+        for var in self._vars.values(): var.set(False)
+
+
 class Sec8KiemTra(BaseSection):
+    _TC_CLIPBOARD = []   # Shared clipboard cho tất cả instance
+    _TC_CLIPBOARD_SRC = ''  # Tên rubric nguồn để hiển thị
+
     def __init__(self, parent, db, **kwargs):
         super().__init__(parent, db, **kwargs)
         self._kt_rows = []
@@ -17,6 +83,7 @@ class Sec8KiemTra(BaseSection):
         self._task_vars = {}
         self.v_tx_pct = tk.StringVar(value='30')
         self.v_ck_pct = tk.StringVar(value='70')
+        self._pct_valid = False  # trạng thái hợp lệ của tỷ trọng
         
         self._undo_stack = []
         self._redo_stack = []
@@ -117,15 +184,36 @@ class Sec8KiemTra(BaseSection):
         tb.Button(bf, text='🗑 Xóa',
                    command=self._kt_delete).pack(side='left', padx=4)
 
-        tb.Label(lf2, text='Tỷ trọng KT thường xuyên (%):', font=('Arial', 10)
-                  ).pack(anchor='w', pady=(8, 0))
-        tb.Entry(lf2, textvariable=self.v_tx_pct, width=8,
-                  font=('Arial', 10)).pack(anchor='w')
+        pct_frame = tb.Labelframe(lf2, text='Tỷ trọng đánh giá', padding=8)
+        pct_frame.pack(fill='x', pady=(8, 0))
 
-        tb.Label(lf2, text='Tỷ trọng thi cuối kỳ (%):', font=('Arial', 10)
-                  ).pack(anchor='w', pady=(4, 0))
-        tb.Entry(lf2, textvariable=self.v_ck_pct, width=8,
-                  font=('Arial', 10)).pack(anchor='w')
+        row_pct = tb.Frame(pct_frame)
+        row_pct.pack(fill='x')
+
+        tb.Label(row_pct, text='KT thường xuyên (%):',
+                 font=('Arial', 10)).grid(row=0, column=0, sticky='w', padx=4)
+        spn_tx = tb.Spinbox(row_pct, from_=0, to=100, increment=5,
+                            textvariable=self.v_tx_pct, width=7, font=('Arial', 10))
+        spn_tx.grid(row=0, column=1, sticky='w', padx=4, pady=2)
+
+        tb.Label(row_pct, text='Thi cuối kỳ (%):',
+                 font=('Arial', 10)).grid(row=0, column=2, sticky='w', padx=(16, 4))
+        spn_ck = tb.Spinbox(row_pct, from_=0, to=100, increment=5,
+                            textvariable=self.v_ck_pct, width=7, font=('Arial', 10))
+        spn_ck.grid(row=0, column=3, sticky='w', padx=4, pady=2)
+
+        self.lbl_pct_sum = tb.Label(row_pct, text='Tổng: 100% ✅',
+                                    bootstyle='success', font=('Arial', 10, 'bold'))
+        self.lbl_pct_sum.grid(row=0, column=4, sticky='w', padx=(20, 4))
+
+        btn_auto_pct = tb.Button(row_pct, text='🔄 Tự động chia',
+                                 bootstyle='outline-secondary',
+                                 command=self._auto_split_pct, padding=2)
+        btn_auto_pct.grid(row=0, column=5, sticky='w', padx=4)
+
+        # Trace realtime
+        self.v_tx_pct.trace_add('write', lambda *_: self._update_pct_pill())
+        self.v_ck_pct.trace_add('write', lambda *_: self._update_pct_pill())
 
         # ── 8.3 Rubric đánh giá ───────────────────────────────────────────
         lf3 = tb.Labelframe(p, text='8.3. Rubric đánh giá', padding=10)
@@ -149,6 +237,10 @@ class Sec8KiemTra(BaseSection):
                                                     db=self.db, table_id='sec8_rubric')
         self.rb_list_frm.pack(fill='both', expand=True)
         self.rb_tree.bind('<<TreeviewSelect>>', lambda _e: self._on_rubric_select())
+
+        # Drag Reorder
+        from sections.base_section import enable_drag_reorder
+        enable_drag_reorder(self.rb_tree, on_reorder_cb=self._on_rubric_reorder)
 
         rb_bf = tb.Frame(left_frm)
         rb_bf.pack(fill='x', pady=(4, 0))
@@ -177,13 +269,175 @@ class Sec8KiemTra(BaseSection):
         tb.Button(tc_bf, text='📋 Điền mẫu nhanh', bootstyle='outline-info',
                    command=self._tc_auto_fill).pack(side='left', padx=8)
 
+        tb.Separator(tc_bf, orient='vertical').pack(side='left', padx=6, fill='y')
+        self.btn_tc_copy = tb.Button(
+            tc_bf, text='📋 Copy TC',
+            bootstyle='outline-info',
+            command=self._tc_copy_all
+        )
+        self.btn_tc_copy.pack(side='left', padx=2)
+
+        self.btn_tc_paste = tb.Button(
+            tc_bf, text='📌 Paste TC',
+            bootstyle='outline-warning',
+            command=self._tc_paste_all,
+            state='disabled'  # Enable sau khi có data trong clipboard
+        )
+        self.btn_tc_paste.pack(side='left', padx=2)
+
+        # Inline Edit
+        from sections.base_section import enable_inline_edit
+        enable_inline_edit(
+            self.kt_tree,
+            editable_cols=['hinh_thuc', 'ty_trong_nhom', 'clo_lien_quan',
+                           'diem_toi_da_cdr', 'trong_so_cdr'],
+            on_change_cb=self._on_kt_cell_changed
+        )
+        enable_inline_edit(
+            self.tc_tree,
+            editable_cols=['trong_so'],
+            on_change_cb=self._on_tc_cell_changed
+        )
+
+        # ── Quick Summary Panel ──────────────────────────────────────────────────────
+        self._summary_collapsed = False
+        self.summary_outer = tb.Frame(p)
+        self.summary_outer.pack(fill='x', padx=16, pady=(0, 16))
+
+        # Header có thể click để collapse
+        summary_header = tb.Frame(self.summary_outer, bootstyle='info')
+        summary_header.pack(fill='x')
+
+        self.lbl_summary_toggle = tb.Label(
+            summary_header,
+            text='📊 Tổng quan đề cương  ▼ (click để thu gọn)',
+            font=('Arial', 10, 'bold'),
+            bootstyle='inverse-info',
+            cursor='hand2',
+            padding=(8, 4)
+        )
+        self.lbl_summary_toggle.pack(fill='x')
+        self.lbl_summary_toggle.bind('<Button-1>', lambda _e: self._toggle_summary())
+
+        # Nội dung summary
+        self.summary_body = tb.Frame(self.summary_outer)
+        self.summary_body.pack(fill='x')
+
+        # Grid 2 cột, 4 dòng
+        summary_grid = tb.Frame(self.summary_body)
+        summary_grid.pack(fill='x', padx=8, pady=6)
+
+        # Định nghĩa các chỉ số cần hiển thị
+        self._summary_labels = {}
+        metrics = [
+            ('clo',      '📌 CLO:',              'col=0,row=0'),
+            ('lt',       '📖 Nội dung LT:',      'col=2,row=0'),
+            ('danh_gia', '⚖ Đánh giá:',         'col=0,row=1'),
+            ('rubric',   '📋 Rubric:',           'col=2,row=1'),
+            ('trong_so', '🎯 Tổng trọng số:',    'col=0,row=2'),
+            ('canh_bao', '⚠ Cảnh báo:',         'col=0,row=3'),
+        ]
+
+        label_positions = [
+            (0, 0), (1, 0), (2, 0), (3, 0),
+            (0, 2), (1, 2), (2, 2), (3, 2),
+            (0, 4), (1, 4),
+            (0, 6), (1, 6),
+        ]
+
+        for i, (key, caption, _) in enumerate(metrics):
+            r, c = divmod(i, 2)
+            tb.Label(summary_grid, text=caption,
+                     font=('Arial', 10), width=16, anchor='w'
+                     ).grid(row=r, column=c*2, sticky='w', padx=(8, 2), pady=2)
+            self._summary_labels[key] = tb.Label(
+                summary_grid, text='—',
+                font=('Arial', 10, 'bold'), anchor='w'
+            )
+            self._summary_labels[key].grid(row=r, column=c*2+1, sticky='w', padx=(0, 16), pady=2)
+
+        # Nút refresh
+        tb.Button(
+            self.summary_body,
+            text='🔄 Cập nhật tóm tắt',
+            bootstyle='outline-secondary',
+            command=self._refresh_summary,
+            padding=2
+        ).pack(anchor='e', padx=8, pady=(0, 4))
+
+    def _on_kt_cell_changed(self, row_id, col_id, new_val):
+        """Sync thay đổi inline edit về self._kt_rows."""
+        try:
+            idx = int(row_id)
+            if 0 <= idx < len(self._kt_rows):
+                self._kt_rows[idx][col_id] = new_val
+                self._refresh_summary()
+        except (ValueError, KeyError):
+            pass
+
+    def _on_tc_cell_changed(self, row_id, col_id, new_val):
+        """Sync thay đổi inline edit về tieu_chi_list."""
+        if self._sel_rubric_idx is None:
+            return
+        try:
+            idx = int(row_id)
+            tcs = self._rubric_list[self._sel_rubric_idx].get('tieu_chi_list', [])
+            if 0 <= idx < len(tcs):
+                tcs[idx][col_id] = new_val
+                self._refresh_summary()
+        except (ValueError, KeyError, IndexError):
+            pass
+
+    def _update_pct_pill(self):
+        """Cập nhật pill tổng trọng số realtime."""
+        if not hasattr(self, 'lbl_pct_sum'):
+            return
+        try:
+            tx = float(self.v_tx_pct.get() or 0)
+            ck = float(self.v_ck_pct.get() or 0)
+            total = tx + ck
+            ok = abs(total - 100) < 0.1
+            self._pct_valid = ok
+            if ok:
+                self.lbl_pct_sum.config(
+                    text=f'Tổng: {total:.0f}% ✅',
+                    bootstyle='success'
+                )
+            else:
+                diff = 100 - total
+                hint = f'(thiếu {diff:.0f}%)' if diff > 0 else f'(dư {-diff:.0f}%)'
+                self.lbl_pct_sum.config(
+                    text=f'Tổng: {total:.0f}% ❌ {hint}',
+                    bootstyle='danger'
+                )
+            self._refresh_summary()
+        except (ValueError, tk.TclError):
+            self.lbl_pct_sum.config(text='Tổng: ? ❌', bootstyle='warning')
+            self._pct_valid = False
+
+    def _auto_split_pct(self):
+        """Tự động chia 30/70 hoặc tùy loại HP."""
+        nhom_tx = [r for r in self._kt_rows if r.get('nhom') == 'thuong_xuyen']
+        nhom_ck = [r for r in self._kt_rows if r.get('nhom') == 'cuoi_ky']
+        if nhom_tx and nhom_ck:
+            self.v_tx_pct.set('30')
+            self.v_ck_pct.set('70')
+        elif nhom_ck:
+            self.v_tx_pct.set('0')
+            self.v_ck_pct.set('100')
+        else:
+            self.v_tx_pct.set('100')
+            self.v_ck_pct.set('0')
+        self._update_pct_pill()
+
     # ─── Kế hoạch KT ─────────────────────────────────────────────────────────
     def _kt_fields(self, nhom):
         return [
             ('noi_dung',          'Bài đánh giá',                    'text',  {}),
             ('hinh_thuc',         'Hình thức đánh giá',              'entry', {}),
             ('tieu_chi',          'Tiêu chí đánh giá (mã Rubric)',   'entry', {}),
-            ('clo_lien_quan',     'CĐR được đánh giá',               'entry', {}),
+            ('clo_lien_quan', 'CĐR được đánh giá', 'entry_with_btn',
+             {'btn_text': '🔗 Chọn CLO', 'btn_cmd_key': 'pick_clo'}),
             ('diem_toi_da_cdr',   'Điểm tối đa của CĐR',            'entry', {}),
             ('trong_so_cdr',      'Trọng số đánh giá theo CĐR (%)', 'entry', {}),
             ('thoi_gian',         'Thời gian',                       'entry', {}),
@@ -220,6 +474,38 @@ class Sec8KiemTra(BaseSection):
                                         tags=(tag,))
         self._kt_rows = rows
 
+    def _pick_clo(self, entry_widget_or_var, dialog=None):
+        """Mở CLOPickerDialog và điền kết quả vào widget."""
+        if not self.hp_id:
+            show_modern_warning(self, 'Chưa chọn HP',
+                                'Vui lòng chọn học phần trước.')
+            return
+        current = ''
+        if isinstance(entry_widget_or_var, tk.StringVar):
+            current = entry_widget_or_var.get()
+        elif hasattr(entry_widget_or_var, 'get'):
+            current = entry_widget_or_var.get()
+        
+        dlg = CLOPickerDialog(self, self.db, self.hp_id, current)
+        if dlg.result is not None:
+            if isinstance(entry_widget_or_var, tk.StringVar):
+                entry_widget_or_var.set(dlg.result)
+            elif hasattr(entry_widget_or_var, 'delete'):
+                entry_widget_or_var.delete(0, 'end')
+                entry_widget_or_var.insert(0, dlg.result)
+
+    def _on_rubric_reorder(self, old_idx, new_idx):
+        """Cập nhật self._rubric_list sau khi kéo thả."""
+        if 0 <= old_idx < len(self._rubric_list) and \
+           0 <= new_idx < len(self._rubric_list):
+            item = self._rubric_list.pop(old_idx)
+            self._rubric_list.insert(new_idx, item)
+            # Cập nhật thu_tu
+            for i, rb in enumerate(self._rubric_list):
+                rb['thu_tu'] = i + 1
+            # Cập nhật sel index theo vị trí mới
+            self._sel_rubric_idx = new_idx
+
     def load(self, hp_id):
         super().load(hp_id)
         hp = self.db.get_hoc_phan(hp_id)
@@ -246,6 +532,9 @@ class Sec8KiemTra(BaseSection):
         self._rubric_list = [dict(rb) | {'tieu_chi_list': [dict(tc) for tc in self.db.get_rubric_tieu_chi(rb['id'])]}
                               for rb in self.db.get_rubric_by_hp(hp_id)]
         self._rb_refresh()
+        self._update_pct_pill()
+        self._update_paste_btn_state()
+        self._after_load_summary()
 
     def save(self):
         if self.hp_id is not None:
@@ -318,6 +607,7 @@ class Sec8KiemTra(BaseSection):
             self._save_undo()
             row.update(dlg.result)
             self._kt_refresh(self._kt_rows)
+            self._refresh_summary()
 
     def _kt_delete(self):
         sel = self.kt_tree.selection()
@@ -331,6 +621,7 @@ class Sec8KiemTra(BaseSection):
             self._save_undo()
             self._kt_rows.pop(idx)
             self._kt_refresh(self._kt_rows)
+            self._refresh_summary()
 
     # ─── Rubric ───────────────────────────────────────────────────────────────
     def _rubric_fields(self):
@@ -392,6 +683,7 @@ class Sec8KiemTra(BaseSection):
                 'tieu_chi_list': []
             })
             self._rb_refresh()
+            self._refresh_summary()
 
     def _rubric_edit(self):
         sel = self.rb_tree.selection()
@@ -403,6 +695,7 @@ class Sec8KiemTra(BaseSection):
         if dlg.result:
             rb.update({k: dlg.result[k] for k in ('ky_hieu', 'ten', 'mo_ta') if k in dlg.result})
             self._rb_refresh()
+            self._refresh_summary()
 
     def _rubric_delete(self):
         sel = self.rb_tree.selection()
@@ -414,6 +707,7 @@ class Sec8KiemTra(BaseSection):
             self._sel_rubric_idx = None
             self._rb_refresh()
             self._tc_refresh()
+            self._refresh_summary()
 
     def _tc_add(self):
         if self._sel_rubric_idx is None:
@@ -424,6 +718,7 @@ class Sec8KiemTra(BaseSection):
             tcs = self._rubric_list[self._sel_rubric_idx].setdefault('tieu_chi_list', [])
             tcs.append({**dlg.result, 'thu_tu': len(tcs) + 1})
             self._tc_refresh()
+            self._refresh_summary()
 
     def _tc_edit(self):
         if self._sel_rubric_idx is None: return
@@ -437,6 +732,7 @@ class Sec8KiemTra(BaseSection):
         if dlg.result:
             tcs[idx].update(dlg.result)
             self._tc_refresh()
+            self._refresh_summary()
 
     def _tc_delete(self):
         if self._sel_rubric_idx is None: return
@@ -448,6 +744,7 @@ class Sec8KiemTra(BaseSection):
         if ask_modern_yesno(self, 'Xác nhận', 'Xóa tiêu chí này?'):
             tcs.pop(idx)
             self._tc_refresh()
+            self._refresh_summary()
 
     def _tc_auto_fill(self):
         """Điền mẫu tiêu chí nhanh cho rubric đang chọn."""
@@ -476,7 +773,76 @@ class Sec8KiemTra(BaseSection):
              'muc_chua_dat': 'Không có hoặc sai', 'thu_tu': 3},
         ]
         self._tc_refresh()
+        self._refresh_summary()
         show_modern_info(self, 'Hoàn thành', 'Đã điền 3 tiêu chí mẫu.')
+
+    def _tc_copy_all(self):
+        """Sao chép tất cả tiêu chí của rubric đang chọn vào clipboard."""
+        if self._sel_rubric_idx is None:
+            show_modern_warning(self, 'Chưa chọn', 'Vui lòng chọn Rubric trước.')
+            return
+        import copy
+        tcs = self._rubric_list[self._sel_rubric_idx].get('tieu_chi_list', [])
+        if not tcs:
+            show_modern_warning(self, 'Rỗng', 'Rubric này chưa có tiêu chí nào.')
+            return
+        Sec8KiemTra._TC_CLIPBOARD = copy.deepcopy(tcs)
+        rb_name = self._rubric_list[self._sel_rubric_idx].get('ten', '')
+        Sec8KiemTra._TC_CLIPBOARD_SRC = rb_name
+        
+        # Bật nút Paste
+        if hasattr(self, 'btn_tc_paste'):
+            self.btn_tc_paste.config(state='normal')
+            self.btn_tc_paste.config(
+                text=f'📌 Paste TC ({len(tcs)} TC từ "{rb_name[:15]}")'
+            )
+        show_modern_info(
+            self, 'Đã sao chép',
+            f'Đã copy {len(tcs)} tiêu chí từ Rubric "{rb_name}" vào clipboard.'
+        )
+
+    def _tc_paste_all(self):
+        """Dán tiêu chí từ clipboard vào rubric đang chọn."""
+        if not Sec8KiemTra._TC_CLIPBOARD:
+            show_modern_warning(self, 'Clipboard rỗng',
+                                'Chưa copy tiêu chí nào. Dùng nút "Copy TC" trước.')
+            return
+        if self._sel_rubric_idx is None:
+            show_modern_warning(self, 'Chưa chọn', 'Vui lòng chọn Rubric đích.')
+            return
+        rb_name = self._rubric_list[self._sel_rubric_idx].get('ten', '')
+        n = len(Sec8KiemTra._TC_CLIPBOARD)
+        src = Sec8KiemTra._TC_CLIPBOARD_SRC
+        if not ask_modern_yesno(
+            self, 'Xác nhận',
+            f'Dán {n} tiêu chí từ "{src}" vào Rubric "{rb_name}"?\n'
+            f'(Tiêu chí hiện tại của Rubric đích sẽ bị thay thế)'
+        ):
+            return
+        import copy
+        self._rubric_list[self._sel_rubric_idx]['tieu_chi_list'] = \
+            copy.deepcopy(Sec8KiemTra._TC_CLIPBOARD)
+        # Cập nhật thu_tu
+        for i, tc in enumerate(self._rubric_list[self._sel_rubric_idx]['tieu_chi_list']):
+            tc['thu_tu'] = i + 1
+        self._tc_refresh()
+        self._refresh_summary()
+        show_modern_info(self, 'Hoàn thành',
+                         f'Đã dán {n} tiêu chí vào Rubric "{rb_name}".')
+
+    def _update_paste_btn_state(self):
+        """Cập nhật trạng thái nút Paste dựa trên clipboard."""
+        if not hasattr(self, 'btn_tc_paste'):
+            return
+        if Sec8KiemTra._TC_CLIPBOARD:
+            n = len(Sec8KiemTra._TC_CLIPBOARD)
+            src = Sec8KiemTra._TC_CLIPBOARD_SRC[:15]
+            self.btn_tc_paste.config(
+                state='normal',
+                text=f'📌 Paste TC ({n} từ "{src}")'
+            )
+        else:
+            self.btn_tc_paste.config(state='disabled', text='📌 Paste TC')
 
     # ─── Auto-fill ───────────────────────────────────────────────────────────
     def _auto_fill_nhiem_vu(self):
@@ -493,6 +859,7 @@ class Sec8KiemTra(BaseSection):
         for txt in self._task_vars.values():
             txt.delete('1.0', 'end')
         self._task_vars['nhiem_vu_sv_len_lop'].insert('1.0', suggestion)
+        self._refresh_summary()
         show_modern_info(self, 'Hoàn thành', 'Đã điền nhiệm vụ mẫu.')
 
     def _auto_fill_assessment(self):
@@ -523,4 +890,99 @@ class Sec8KiemTra(BaseSection):
             })
         self._kt_rows = new_rows
         self._kt_refresh(self._kt_rows)
+        self._refresh_summary()
         show_modern_info(self, 'Hoàn thành', 'Đã tạo ma trận đánh giá mẫu.')
+
+    # ── Summary Methods ──────────────────────────────────────────────────────────
+    def _toggle_summary(self):
+        """Thu gọn/mở rộng summary panel."""
+        self._summary_collapsed = not self._summary_collapsed
+        if self._summary_collapsed:
+            self.summary_body.pack_forget()
+            self.lbl_summary_toggle.config(
+                text='📊 Tổng quan đề cương  ▶ (click để mở)'
+            )
+        else:
+            self.summary_body.pack(fill='x')
+            self.lbl_summary_toggle.config(
+                text='📊 Tổng quan đề cương  ▼ (click để thu gọn)'
+            )
+
+    def _refresh_summary(self):
+        """Cập nhật nội dung summary panel từ data hiện tại."""
+        if not hasattr(self, '_summary_labels'):
+            return
+        
+        def _set(key, text, style='default'):
+            lbl = self._summary_labels.get(key)
+            if lbl:
+                lbl.config(text=text, bootstyle=style)
+        
+        # CLO count — lấy từ DB
+        clo_count = 0
+        if self.hp_id:
+            try:
+                # Sử dụng get_clo thay vì get_clo_by_hp cho khớp db.py
+                clo_count = len(self.db.get_clo(self.hp_id) or [])
+            except Exception:
+                pass
+        _set('clo', f'{clo_count} CLO' + (' ✅' if clo_count >= 2 else ' ⚠'),
+             'success' if clo_count >= 2 else 'warning')
+        
+        # Nội dung LT
+        lt_count = 0
+        if self.hp_id:
+            try:
+                # Sử dụng get_noi_dung(..., phan='lt') thay vì get_noi_dung_lt cho khớp db.py
+                lt_count = len(self.db.get_noi_dung(self.hp_id, phan='lt') or [])
+            except Exception:
+                pass
+        _set('lt', f'{lt_count} mục' + (' ✅' if lt_count > 0 else ' ⚠'),
+             'success' if lt_count > 0 else 'warning')
+        
+        # Đánh giá
+        tx = len([r for r in self._kt_rows if r.get('nhom') == 'thuong_xuyen'])
+        ck = len([r for r in self._kt_rows if r.get('nhom') == 'cuoi_ky'])
+        _set('danh_gia', f'TX: {tx}  |  CK: {ck}',
+             'success' if (tx + ck) > 0 else 'warning')
+        
+        # Rubric
+        rb_count = len(self._rubric_list)
+        tc_count = sum(len(rb.get('tieu_chi_list', [])) for rb in self._rubric_list)
+        _set('rubric', f'{rb_count} Rubric, {tc_count} tiêu chí',
+             'success' if rb_count > 0 else 'warning')
+        
+        # Tổng trọng số
+        try:
+            tx_pct = float(self.v_tx_pct.get() or 0)
+            ck_pct = float(self.v_ck_pct.get() or 0)
+            total = tx_pct + ck_pct
+            ok = abs(total - 100) < 0.1
+            _set('trong_so', f'TX {tx_pct:.0f}% + CK {ck_pct:.0f}% = {total:.0f}%',
+                 'success' if ok else 'danger')
+        except ValueError:
+            _set('trong_so', 'Chưa điền', 'warning')
+        
+        # Cảnh báo tổng hợp
+        warnings = []
+        if clo_count == 0:
+            warnings.append('Chưa có CLO')
+        if not self._kt_rows:
+            warnings.append('Chưa có bài ĐG')
+        if rb_count == 0:
+            warnings.append('Chưa có Rubric')
+        try:
+            total_w = float(self.v_tx_pct.get() or 0) + float(self.v_ck_pct.get() or 0)
+            if abs(total_w - 100) > 0.1:
+                warnings.append('Trọng số ≠ 100%')
+        except ValueError:
+            pass
+        
+        if warnings:
+            _set('canh_bao', ' | '.join(warnings), 'danger')
+        else:
+            _set('canh_bao', 'Không có ⭐', 'success')
+
+    def _after_load_summary(self):
+        """Gọi sau load() để cập nhật summary."""
+        self.after(100, self._refresh_summary)  # delay nhỏ để UI render xong

@@ -32,6 +32,7 @@ from repositories.hoc_phan_repository import HocPhanRepository
 from services.hoc_phan_service import HocPhanService
 from services.validation_service import ValidationService
 from services.import_export_service import ImportExportService
+from services.deccuong_service import DeCuongService
 from controllers.main_controller import MainController
 from controllers.tree_controller import TreeController
 from import_preview_dialog import ImportPreviewDialog
@@ -77,6 +78,7 @@ class QLCTDTApp:
         self.val_service = ValidationService()
         self.hp_service = HocPhanService(self.hp_repo, self.val_service)
         self.ie_service = ImportExportService(self.db)
+        self.deccuong_service = DeCuongService(self.db)
         
         # Main Controller
         self.controller = MainController(
@@ -322,6 +324,16 @@ class QLCTDTApp:
         tb.Entry(tb_frame, textvariable=self.v_search, width=22).pack(side='right', padx=4)
         tb.Label(tb_frame, text='Tìm học phần:').pack(side='right')
 
+        # Overall Progress Bar
+        prog_frm = tb.Frame(header_frm)
+        prog_frm.pack(side='right', padx=8)
+        self.lbl_percent = tb.Label(prog_frm, text='Hoàn thành: 0%',
+                                     font=('Arial', 9), bootstyle='muted')
+        self.lbl_percent.pack(side='top', anchor='e')
+        self.progress_bar = tb.Progressbar(prog_frm, length=120,
+                                            bootstyle='success-striped', maximum=100)
+        self.progress_bar.pack(side='top')
+
     # ── Body ─────────────────────────────────────────────────────────────────
     def _build_body(self):
         paned = tb.Panedwindow(self.root, orient='horizontal')
@@ -390,18 +402,34 @@ class QLCTDTApp:
         self.nb = tb.Notebook(right, bootstyle='info')
         self.nb.pack(fill='both', expand=True, pady=4)
         
+        # Mapping: tab_index → (label_gốc, progress_key, mô_tả_ngắn/fn)
+        self._TAB_BADGE_MAP = {
+            0: ('1. Thông tin',     's1_thong_tin',    ''),
+            2: ('3. Mục tiêu',      's3_muc_tieu',     ''),
+            3: ('4. CLO',           's4_clo',          lambda p: f'({p.get("s4_clo_count",0)})'),
+            4: ('5. Học liệu',      's5_hoc_lieu',     ''),
+            5: ('6. Nội dung',      's6_noi_dung',     lambda p: f'({p.get("s6_lt_count",0)} mục)'),
+            7: ('8. Kiểm tra',      's8_danh_gia_ok',  lambda p: f'({p.get("s8_trong_so",0):.0f}%)'),
+        }
 
 
 
         def _on_modified(sec, is_dirty):
             idx = self._sections.index(sec)
             label = self.nb.tab(idx, "text")
+            
+            # Clean label of both dirty flag AND potential badges to start fresh or selectively update
+            # Actually, update_tab_badges will handle the full label reconstruction.
+            # But we need to keep the dirty flag if it's there.
             if is_dirty:
                 if not label.endswith(" *"):
                     self.nb.tab(idx, text=label + " *")
             else:
                 if label.endswith(" *"):
                     self.nb.tab(idx, text=label[:-2])
+            
+            # Optionally trigger badge update on modification? 
+            # Snippet only asks for it after load/save/tab changed, so we'll stick to that to avoid performance issues.
 
         self.sec1 = Sec1ThongTin(self.nb, self.db, lazy=True, modified_callback=_on_modified)
         self.sec2 = Sec2MoTa(self.nb, self.db, lazy=True, modified_callback=_on_modified)
@@ -644,6 +672,7 @@ class QLCTDTApp:
             sec = self._sections[active_tab]
             try:
                 sec.load(hp_id)
+                self.update_tab_badges(hp_id)
             except Exception as ex:
                 print(f'[WARN] {sec.__class__.__name__}.load: {ex}')
 
@@ -662,6 +691,7 @@ class QLCTDTApp:
                 if sec.hp_id != self.current_hp_id:
                     try:
                         sec.load(self.current_hp_id)
+                        self.update_tab_badges(self.current_hp_id)
                     except Exception as ex:
                         print(f'[WARN] {sec.__class__.__name__}.load (tab change): {ex}')
 
@@ -754,6 +784,7 @@ class QLCTDTApp:
                 self.hp_tree.see(new_selection[0])
             
             self._set_status(f'✔ Đã lưu thành công')
+            self.update_tab_badges()
 
     def _validate_accuracy(self):
         """Deprecated: Validation is now handled by MainController/ValidationService."""
@@ -771,6 +802,47 @@ class QLCTDTApp:
                 try: sec.clear()
                 except Exception: pass
             self.root.title(APP_TITLE)
+
+    def update_tab_badges(self, hp_id=None):
+        """Cập nhật badge ✅/⚠ trên tab labels sau khi load/save HP."""
+        if hp_id is None:
+            hp_id = getattr(self, 'current_hp_id', None)
+        if hp_id is None:
+            return
+        
+        try:
+            progress = self.deccuong_service.get_completion_progress(hp_id)
+        except Exception:
+            return
+        
+        for tab_idx, (base_label, prog_key, extra_fn) in self._TAB_BADGE_MAP.items():
+            try:
+                # Get current text to preserve dirty flag
+                current_text = self.nb.tab(tab_idx, "text")
+                is_dirty = current_text.endswith(" *")
+                
+                ok = progress.get(prog_key, False)
+                icon = '✅' if ok else '⚠'
+                extra = ''
+                if callable(extra_fn):
+                    extra = extra_fn(progress)
+                elif isinstance(extra_fn, str):
+                    extra = extra_fn
+                
+                new_label = f'{icon} {base_label} {extra}'.strip()
+                if is_dirty:
+                    new_label += " *"
+                self.nb.tab(tab_idx, text=new_label)
+            except Exception:
+                pass
+        
+        # Cập nhật progress bar tổng thể
+        if hasattr(self, 'progress_bar'):
+            self.progress_bar['value'] = progress.get('percent', 0)
+        if hasattr(self, 'lbl_percent'):
+            self.lbl_percent.config(
+                text=f"Hoàn thành: {progress.get('percent', 0)}%"
+            )
 
     # ── Export Word ──────────────────────────────────────────────────────────
     def export_word_builtin(self):
@@ -1226,16 +1298,50 @@ class _HistoryDialog(tb.Toplevel):
         tf, self.tree = make_tree(frm, cols, heads, widths, height=15)
         tf.pack(fill=BOTH, expand=YES)
         
-        for r in history:
-            self.tree.insert("", END, values=(
+        self._history = history
+        for i, r in enumerate(history):
+            self.tree.insert("", END, iid=str(i), values=(
                 r['created_at'],
-                "NHẬP" if r['operation_type'] == 'import' else "XUẤT",
+                "NHẬP" if r['operation_type'] == 'IMPORT' else "XUẤT",
                 r['success_count'],
                 r['error_count'],
-                r['details']
+                r['details'][:100] + "..." if r['details'] and len(r['details']) > 100 else r['details']
             ))
             
+        self.tree.bind("<Double-1>", self._show_details)
         tb.Button(self, text="Đóng", command=self.destroy).pack(pady=10)
+
+    def _show_details(self, event=None):
+        sel = self.tree.selection()
+        if not sel: return
+        idx = int(sel[0])
+        record = self._history[idx]
+        
+        # Parse JSON for better view
+        import json
+        try:
+            details_obj = json.loads(record['details'])
+            formatted_json = json.dumps(details_obj, indent=4, ensure_ascii=False)
+        except:
+            formatted_json = record['details']
+
+        top = tb.Toplevel(self)
+        top.title(f"Chi tiết: {record['operation_type']} - {record['created_at']}")
+        top.geometry("700x500")
+        
+        txt = tk.Text(top, font=("Consolas", 10), wrap=tk.NONE)
+        txt.pack(fill=BOTH, expand=YES, padx=10, pady=10)
+        
+        # Scrollbars
+        v_scroll = tb.Scrollbar(txt, orient=VERTICAL, command=txt.yview)
+        v_scroll.pack(side=RIGHT, fill=Y)
+        h_scroll = tb.Scrollbar(txt, orient=HORIZONTAL, command=txt.xview)
+        h_scroll.pack(side=BOTTOM, fill=X)
+        txt.config(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
+        
+        txt.insert(END, formatted_json)
+        txt.config(state=DISABLED)
+        tb.Button(top, text="Đóng", command=top.destroy).pack(pady=5)
 
 
 # ─── Entry point ──────────────────────────────────────────────────────────────

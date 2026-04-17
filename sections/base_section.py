@@ -452,6 +452,20 @@ class RowEditDialog(tb.Toplevel):
                 tb.Button(f, text='...', width=3, command=_open_picker).pack(side='right', padx=(4,0))
                 self._vars[key] = var
                 self.entries[key] = e
+            elif wtype == 'entry_with_btn':
+                row_frm = tb.Frame(frm)
+                row_frm.grid(row=r, column=1, sticky='ew', **pad)
+                var = tk.StringVar(value=str(initial.get(key, '')))
+                ent = tb.Entry(row_frm, textvariable=var, font=('Arial', 10))
+                ent.pack(side='left', fill='x', expand=True)
+                btn_txt = opts.get('btn_text', '...')
+                # cmd_key dùng để callback về parent
+                cmd_key = opts.get('btn_cmd_key', '')
+                tb.Button(row_frm, text=btn_txt, bootstyle='outline-info', padding=2,
+                          command=lambda v=var, k=cmd_key: self._handle_btn_cmd(k, v)
+                          ).pack(side='left', padx=(4, 0))
+                self._vars[key] = var
+                self.entries[key] = ent
             else:  # entry
                 var = tk.StringVar(value=str(initial.get(key, '')))
                 e = tb.Entry(frm, textvariable=var, width=44,
@@ -475,6 +489,13 @@ class RowEditDialog(tb.Toplevel):
         for key, txt in self._texts.items():
             self.result[key] = txt.get('1.0', 'end-1c').strip()
         self.destroy()
+
+    def _handle_btn_cmd(self, key, var):
+        # Tự động gọi hàm _<key> trên master nếu tồn tại
+        method_name = f"_{key}"
+        if hasattr(self.master, method_name):
+            # Pass cả var và dialog (self) để có thể update nhiều field
+            getattr(self.master, method_name)(var, dialog=self)
 
 
 # ─── Dialog chọn nhiều mục (Checkbox list) ──────────────────────────────────
@@ -555,3 +576,172 @@ class MultiSelectDialog(tb.Toplevel):
     def _ok(self):
         self.result = [opt for opt in self.options_list if self._checked_vars[opt].get()]
         self.destroy()
+
+def enable_inline_edit(tree, editable_cols, on_change_cb=None):
+    """
+    Cho phép inline edit các cột được chỉ định trong Treeview.
+    
+    Args:
+        tree: ttk.Treeview widget
+        editable_cols: list mã cột có thể sửa, VD: ['hinh_thuc', 'ty_trong']
+        on_change_cb: callback(row_id, col_id, new_value) sau khi sửa xong
+    """
+    _active_editor = {'widget': None}
+
+    def _close_editor(commit=True):
+        ed = _active_editor.get('widget')
+        if ed and ed.winfo_exists():
+            if commit:
+                row_id = _active_editor['row_id']
+                col_id = _active_editor['col_id']
+                new_val = _active_editor['var'].get()
+                try:
+                    tree.set(row_id, col_id, new_val)
+                    if on_change_cb:
+                        on_change_cb(row_id, col_id, new_val)
+                except Exception:
+                    pass
+            ed.destroy()
+        _active_editor['widget'] = None
+
+    def _on_double_click(event):
+        # Đóng editor cũ trước
+        _close_editor(commit=True)
+        
+        region = tree.identify_region(event.x, event.y)
+        if region != 'cell':
+            return
+        
+        col = tree.identify_column(event.x)
+        col_idx = int(col.replace('#', '')) - 1
+        cols = tree['columns']
+        if col_idx < 0 or col_idx >= len(cols):
+            return
+        col_id = cols[col_idx]
+        
+        if col_id not in editable_cols:
+            return
+        
+        row_id = tree.identify_row(event.y)
+        if not row_id:
+            return
+        
+        # Lấy bounding box của cell
+        bbox = tree.bbox(row_id, col)
+        if not bbox:
+            return
+        x, y, w, h = bbox
+        
+        var = tk.StringVar(value=tree.set(row_id, col_id))
+        
+        # Tạo Entry overlay
+        entry = tk.Entry(
+            tree, textvariable=var,
+            font=('Arial', 10),
+            relief='flat',
+            bd=1,
+            highlightthickness=1,
+            highlightcolor='#01696f'
+        )
+        entry.place(x=x, y=y, width=w, height=h)
+        entry.focus_set()
+        entry.select_range(0, 'end')
+        
+        _active_editor.update({
+            'widget': entry,
+            'row_id': row_id,
+            'col_id': col_id,
+            'var': var
+        })
+        
+        def _on_tab(e):
+            _close_editor(commit=True)
+            # Chuyển sang cột kế tiếp có thể edit
+            cur_idx = list(cols).index(col_id)
+            for next_col in cols[cur_idx+1:]:
+                if next_col in editable_cols:
+                    bbox2 = tree.bbox(row_id, f'#{list(cols).index(next_col)+1}')
+                    if bbox2:
+                        # Simulate double click ở vị trí đó
+                        tree.event_generate('<Double-1>',
+                            x=bbox2[0]+2, y=bbox2[1]+2)
+                    break
+            return 'break'
+        
+        entry.bind('<Return>',    lambda e: _close_editor(True))
+        entry.bind('<Escape>',    lambda e: _close_editor(False))
+        entry.bind('<Tab>',       _on_tab)
+        entry.bind('<FocusOut>',  lambda e: _close_editor(True))
+    
+    def _on_click_outside(event):
+        if _active_editor.get('widget'):
+            _close_editor(commit=True)
+    
+    tree.bind('<Double-1>',   _on_double_click)
+    tree.bind('<Button-1>',   _on_click_outside)
+
+def enable_drag_reorder(tree, on_reorder_cb=None):
+    """
+    Cho phép kéo thả để thay đổi thứ tự rows trong Treeview.
+    
+    Args:
+        tree: ttk.Treeview widget
+        on_reorder_cb: callback(old_idx, new_idx) sau khi đổi thứ tự
+    """
+    state = {'drag_item': None, 'drag_start_y': 0}
+
+    def _get_row_center_y(item_id):
+        bbox = tree.bbox(item_id)
+        if bbox:
+            return bbox[1] + bbox[3] // 2
+        return 0
+
+    def _on_press(event):
+        item = tree.identify_row(event.y)
+        if item:
+            state['drag_item'] = item
+            state['drag_start_y'] = event.y
+            tree.configure(cursor='fleur')
+
+    def _on_motion(event):
+        if not state['drag_item']:
+            return
+        target = tree.identify_row(event.y)
+        if target and target != state['drag_item']:
+            # Visual highlight target row
+            tree.selection_set(target)
+
+    def _on_release(event):
+        drag_item = state['drag_item']
+        if not drag_item:
+            return
+        tree.configure(cursor='')
+        state['drag_item'] = None
+        
+        target = tree.identify_row(event.y)
+        if not target or target == drag_item:
+            tree.selection_set(drag_item)
+            return
+        
+        # Lấy vị trí hiện tại
+        all_items = tree.get_children()
+        old_idx = list(all_items).index(drag_item)
+        new_idx = list(all_items).index(target)
+        
+        # Di chuyển trong tree
+        tree.move(drag_item, '', new_idx)
+        tree.selection_set(drag_item)
+        
+        if on_reorder_cb:
+            on_reorder_cb(old_idx, new_idx)
+
+    # Thêm tooltip hướng dẫn
+    tree._drag_tooltip = None
+    
+    def _show_drag_hint(event):
+        if not tree._drag_tooltip and event.y < 20:
+            pass  # Có thể thêm tooltip sau
+
+    tree.bind('<ButtonPress-1>',   _on_press)
+    tree.bind('<B1-Motion>',       _on_motion)
+    tree.bind('<ButtonRelease-1>', _on_release)

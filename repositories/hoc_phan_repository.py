@@ -39,6 +39,9 @@ class HocPhanRepository(BaseRepository):
     def set_muc_tieu(self, hp_id, items):
         self.db.set_muc_tieu(hp_id, items)
 
+    def add_muc_tieu(self, hp_id, data):
+        self.db.add_muc_tieu(hp_id, data)
+
     def set_clo(self, hp_id, items):
         self.db.set_clo(hp_id, items)
 
@@ -62,6 +65,9 @@ class HocPhanRepository(BaseRepository):
 
     def set_lich_su(self, hp_id, items):
         self.db.set_lich_su(hp_id, items)
+
+    def add_lich_su(self, hp_id, data):
+        self.db.add_lich_su_cap_nhat(hp_id, data)
 
     def calculate_hours(self, hp_id):
         return self.db.calculate_and_update_hours(hp_id)

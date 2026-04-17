@@ -87,6 +87,7 @@ class ImportPreviewDialog(tb.Toplevel):
         
         # Binding for selection
         self.tree.bind("<Button-1>", self._on_click)
+        self.tree.bind("<Double-1>", self._show_logs)
 
     def _populate_tree(self):
         self.tree.delete(*self.tree.get_children())
@@ -100,7 +101,7 @@ class ImportPreviewDialog(tb.Toplevel):
                 status_text = "Lỗi"
             
             check_mark = " [X] " if item.get('selected') else " [  ] "
-            ma = item['data']['thong_tin'].get('ma', '') if 'data' in item else ''
+            ma = item['data']['hp'].get('ma', '') if 'data' in item else ''
             ten = item['data'].get('ten_viet', '') if 'data' in item else item.get('file_name', '')
             
             self.tree.insert(
@@ -124,6 +125,34 @@ class ImportPreviewDialog(tb.Toplevel):
                         self.preview_items[idx]['selected'] = False
                     
                     self._populate_tree()
+
+    def _show_logs(self, event=None):
+        sel = self.tree.selection()
+        if not sel: return
+        idx = int(sel[0])
+        item = self.preview_items[idx]
+        
+        logs = item.get('logs', [])
+        if not logs:
+            if item['status'] == 'ERROR':
+                logs = [('error', 'Critical', item.get('error', 'Unknown error'))]
+            else:
+                logs = [('info', 'Hệ thống', 'Không có log chi tiết.')]
+        
+        # Show mini dialog
+        top = tb.Toplevel(self)
+        top.title(f"Log bóc tách: {item['file_name']}")
+        top.geometry("600x400")
+        
+        txt = tk.Text(top, font=("Consolas", 10), padding=10)
+        txt.pack(fill=BOTH, expand=YES)
+        
+        for level, part, msg in logs:
+            icon = "✅" if level == 'success' else "❌"
+            txt.insert(END, f"{icon} [{part}]: {msg}\n")
+            
+        txt.config(state=DISABLED)
+        tb.Button(top, text="Đóng", command=top.destroy).pack(pady=10)
 
     def _select_all(self):
         for item in self.preview_items:

@@ -15,18 +15,34 @@ class DCCTHPImporter:
             'danh_gia': [],
             'rubrics': []
         }
+        self.logs = [] # [('success'|'error', 'tab_name', 'message')]
 
     def import_from_docx(self, file_path):
-        doc = Document(file_path)
-        
-        # 1. Parse Header/Paragraphs for HP Info
-        self._parse_paragraphs(doc.paragraphs)
-        
-        # 2. Iterate Tables
-        for table in doc.tables:
-            self._process_table(table)
+        try:
+            doc = Document(file_path)
             
-        return self.data
+            # 1. Parse Header/Paragraphs for HP Info
+            try:
+                self._parse_paragraphs(doc.paragraphs)
+                if self.data['hp'].get('ten_viet'):
+                    self.logs.append(('success', 'Thông tin chung', 'Bóc tách thành công thông tin tiêu đề.'))
+            except Exception as e:
+                self.logs.append(('error', 'Thông tin chung', f'Lỗi paragraph: {str(e)}'))
+            
+            # 2. Iterate Tables
+            for i, table in enumerate(doc.tables):
+                try:
+                    self._process_table(table)
+                except Exception as e:
+                    self.logs.append(('error', f'Bảng số {i+1}', f'Lỗi bóc tách: {str(e)}'))
+                    
+            return {
+                'data': self.data,
+                'logs': self.logs
+            }
+        except Exception as e:
+            self.logs.append(('error', 'Hệ thống', f'Không thể mở file Word: {str(e)}'))
+            return {'data': self.data, 'logs': self.logs}
 
     def _clean(self, text):
         if not text: return ""
@@ -58,21 +74,31 @@ class DCCTHPImporter:
         
         if "giảng viên phụ trách" in header_text or "họ và tên" in header_text:
             self._parse_giang_vien(table)
+            self.logs.append(('success', 'Giảng viên', f'Đã nhập {len(self.data["giang_vien"])} giảng viên.'))
         elif "mã học phần" in header_text:
             self._parse_hp_table(table)
+            self.logs.append(('success', 'Thông tin mã HP', 'Đã cập nhật mã và số tín chỉ.'))
         elif "mục tiêu" in header_text and "mô tả" in header_text:
             self._parse_muc_tieu(table)
+            self.logs.append(('success', 'Mục tiêu', f'Đã nhập {len(self.data["muc_tieu"])} mục tiêu.'))
         elif "chuẩn đầu ra" in header_text or ("mã clo" in header_text and "mô tả" in header_text):
             self._parse_clo(table)
+            self.logs.append(('success', 'CLO', f'Đã nhập {len(self.data["clos"])} chuẩn đầu ra.'))
+        elif "tài liệu" in header_text and ("giáo trình" in header_text or "tham khảo" in header_text):
+            self._parse_tai_lieu(table)
+            self.logs.append(('success', 'Học liệu', f'Đã nhập {len(self.data["hoc_lieu"])} tài liệu.'))
         elif "nội dung" in header_text and ("giờ" in header_text or "lt" in header_text):
             self._parse_noi_dung(table)
+            self.logs.append(('success', 'Nội dung', f'Đã nhập {len(self.data["noi_dung"])} mục nội dung.'))
         elif "thành phần đánh giá" in header_text or "trọng số" in header_text:
             self._parse_danh_gia(table)
+            self.logs.append(('success', 'Đánh giá', f'Đã nhập {len(self.data["danh_gia"])} bài đánh giá.'))
         elif "rubric" in header_text.upper():
             self._parse_rubric(table)
+            self.logs.append(('success', 'Rubric', 'Bóc tách xong bảng Rubric.'))
 
     def _parse_hp_table(self, table):
-        # General Info Table
+        # General Info Table Model 2
         for row in table.rows:
             cells = [self._cell_text(c) for c in row.cells]
             for i, c in enumerate(cells):
@@ -84,93 +110,99 @@ class DCCTHPImporter:
                     if m: self.data['hp']['so_tin_chi'] = int(m.group(1))
                 elif "loại học phần" in c_low and i+1 < len(cells):
                     self.data['hp']['loai_hp'] = 'bat_buoc' if 'bắt buộc' in cells[i+1].lower() else 'tu_chon'
+                elif "đơn vị quản lý" in c_low and i+1 < len(cells):
+                    self.data['hp']['don_vi_ql'] = cells[i+1]
+                elif "loại hình" in c_low and i+1 < len(cells):
+                    self.data['hp']['loai_hinh'] = cells[i+1]
                 elif "tổng giờ" in c_low and i+1 < len(cells):
                     m = re.search(r'(\d+)', cells[i+1])
                     if m: self.data['hp']['tong_gio'] = int(m.group(1))
 
-    def _parse_giang_vien(self, table):
-        for row in table.rows[1:]: # Skip header
-            cells = [self._cell_text(c) for c in row.cells]
-            if len(cells) >= 3 and cells[1]:
-                self.data['giang_vien'].append({
-                    'ho_ten': cells[1],
-                    'hoc_ham_vi': cells[2] if len(cells) > 2 else '',
-                    'sdt': cells[3] if len(cells) > 3 else '',
-                    'email': cells[4] if len(cells) > 4 else ''
-                })
-
-    def _parse_muc_tieu(self, table):
+    def _parse_tai_lieu(self, table):
+        # Model 2 has sub-sections for materials. We aggregate them into self.data['hoc_lieu']
         for row in table.rows[1:]:
             cells = [self._cell_text(c) for c in row.cells]
-            if len(cells) >= 3:
-                self.data['muc_tieu'].append({
-                    'ma_mt': cells[1],
-                    'mo_ta': cells[2],
-                    'plo_id': cells[3] if len(cells) > 3 else ''
-                })
-
-    def _parse_clo(self, table):
-        for row in table.rows[1:]:
-            cells = [self._cell_text(c) for c in row.cells]
-            if len(cells) >= 2:
-                # Detect columns: Ma CLO | Mo ta | IRM | PLO
-                self.data['clos'].append({
-                    'ma_clo': cells[0],
-                    'mo_ta': cells[1],
-                    'level_irm': cells[2] if len(cells) > 2 else 'I',
-                    'plo_id': cells[3] if len(cells) > 3 else ''
-                })
-
-    def _parse_noi_dung(self, table):
-        # Detailed content table is complex. We look for rows that are NOT the first 2 (headers)
-        # Search for data start
-        data_start = 0
-        for i, row in enumerate(table.rows):
-            if "chương" in self._cell_text(row.cells[1]).lower() or re.match(r'^\d+', self._cell_text(row.cells[0])):
-                data_start = i
-                break
-        
-        current_chuong = ""
-        stt = 1
-        for row in table.rows[data_start:]:
-            cells = [self._cell_text(c) for c in row.cells]
-            if len(cells) < 2: continue
-            
-            ten = cells[1]
-            if "chương" in ten.lower() or "bài" in ten.lower():
-                current_chuong = ten
-                self.data['noi_dung'].append({
-                    'stt': stt,
-                    'loai': 'chuong',
-                    'ten_chuong': ten,
-                    'in_dam': 1
-                })
-            else:
-                self.data['noi_dung'].append({
-                    'stt': stt,
-                    'loai': 'muc',
-                    'ten_chuong': ten,
-                    'gio_lt': cells[2] if len(cells) > 2 else 0,
-                    'gio_bt': cells[3] if len(cells) > 3 else 0,
-                    'gio_th_tn': cells[4] if len(cells) > 4 else 0,
-                    'clo_ids': cells[5] if len(cells) > 5 else '',
-                    'ma_bai_danh_gia': cells[6] if len(cells) > 6 else '',
-                    'ma_tailieu': cells[7] if len(cells) > 7 else ''
-                })
-            stt += 1
-
-    def _parse_danh_gia(self, table):
-        # Assessment plan
-        for row in table.rows[1:]:
-            cells = [self._cell_text(c) for c in row.cells]
-            if len(cells) >= 3 and "%" in cells[2]:
-                self.data['danh_gia'].append({
-                    'loai_bai': cells[0],
-                    'ten_bai': cells[1],
-                    'trong_so': float(re.search(r'(\d+)', cells[2]).group(1)) / 100,
-                    'clo_ids': cells[3] if len(cells) > 3 else ''
+            if len(cells) >= 1 and cells[0]:
+                self.data['hoc_lieu'].append({
+                    'loai': 'chinh' if 'chính' in cells[0].lower() else 'tham_khao',
+                    'noi_dung': " ".join(cells)
                 })
 
     def _parse_rubric(self, table):
-        # Optional: Parse rubric tables
-        pass
+        # Criteria Table: Tiêu chí | Trọng số | Xuất sắc | Tốt | Đạt | Chưa đạt
+        header_text = " ".join(self._cell_text(c).lower() for c in table.rows[0].cells)
+        if "tiêu chí" not in header_text: return
+        
+        rubric_item = {
+            'ten': 'Rubric đánh giá',
+            'ky_hieu': f"R{len(self.data['rubrics'])+1}",
+            'tieu_chi_list': []
+        }
+        
+        for row in table.rows[1:]:
+            cells = [self._cell_text(c) for c in row.cells]
+            if len(cells) >= 6 and cells[0]:
+                rubric_item['tieu_chi_list'].append({
+                    'tieu_chi': cells[0],
+                    'trong_so': cells[1],
+                    'muc_xuat_sac': cells[2],
+                    'muc_tot': cells[3],
+                    'muc_dat': cells[4],
+                    'muc_chua_dat': cells[5]
+                })
+        
+        if rubric_item['tieu_chi_list']:
+            self.data['rubrics'].append(rubric_item)
+
+def parse_docx(file_path):
+    """Wrapper function for service compatibility."""
+    importer = DCCTHPImporter()
+    return importer.import_from_docx(file_path)
+
+def import_single(db, result_dict, khoa_id=None):
+    data = result_dict
+    hp_data = data.get('hp', {})
+    if khoa_id: hp_data['khoa_id'] = khoa_id
+    
+    local_logs = []
+    hp_id = None
+
+    # 1. Insert/Update Hoc Phan
+    try:
+        with db.transaction():
+            ma = hp_data.get('ma')
+            if ma:
+                existing = db.conn.execute("SELECT id FROM hoc_phan WHERE ma=?", (ma,)).fetchone()
+                if existing:
+                    hp_id = existing[0]
+                    db.update_hoc_phan(hp_id, hp_data)
+                    local_logs.append(("success", "Thông tin chung", "Cập nhật thông tin học phần hiện có."))
+            
+            if not hp_id:
+                hp_id = db.add_hoc_phan(hp_data)
+                local_logs.append(("success", "Thông tin chung", "Tạo mới học phần thành công."))
+    except Exception as e:
+        local_logs.append(("error", "Thông tin chung", f"Lỗi nghiêm trọng: {str(e)}"))
+        return None, local_logs
+
+    # 2. Associated data
+    def _safe_save(section_name, func, items, *args):
+        if not items: return
+        try:
+            with db.transaction():
+                func(hp_id, items, *args)
+                local_logs.append(("success", section_name, f"Nhập thành công {len(items) if hasattr(items, '__len__') else ''} mục."))
+        except Exception as e:
+            local_logs.append(("error", section_name, f"Lỗi: {str(e)}"))
+
+    _safe_save("Mục tiêu", db.set_muc_tieu, data.get('muc_tieu'))
+    _safe_save("Chuẩn đầu ra (CLO)", db.set_clo, data.get('clos'))
+    _safe_save("Học liệu", db.set_hoc_lieu, data.get('hoc_lieu'))
+    _safe_save("Nội dung chi tiết", db.set_noi_dung_hp, 'LT', data.get('noi_dung'))
+    _safe_save("Kế hoạch đánh giá", db.set_ke_hoach_kt, data.get('danh_gia'))
+    _safe_save("Rubrics", db.set_rubric, data.get('rubrics'))
+    
+    # 3. Finalize
+    db.calculate_and_update_hours(hp_id)
+
+    return hp_id, local_logs

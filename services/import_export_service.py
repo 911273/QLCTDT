@@ -30,14 +30,18 @@ class ImportExportService:
 
     def import_word_single(self, file_path):
         parsed = word_import.parse_docx(file_path)
-        hp_id = word_import.import_single(self.db, parsed)
+        hp_id, local_logs = word_import.import_single(self.db, parsed['data'])
         # Log
         self.db.add_import_export_log(
             type='IMPORT',
             total=1,
             success=1 if hp_id else 0,
             error=0 if hp_id else 1,
-            details_json=json.dumps([{'file': os.path.basename(file_path), 'status': 'ok' if hp_id else 'error'}], ensure_ascii=False),
+            details_json=json.dumps([{
+                'file': os.path.basename(file_path), 
+                'status': 'ok' if hp_id else 'error',
+                'logs': local_logs
+            }], ensure_ascii=False),
             user_action=f'Import single file: {os.path.basename(file_path)}'
         )
         return hp_id, parsed
@@ -49,8 +53,11 @@ class ImportExportService:
         
         def _parse_one(fpath):
             try:
-                data = word_import.parse_docx(fpath)
-                ma = data['thong_tin'].get('ma', '')
+                full_res = word_import.parse_docx(fpath)
+                data = full_res.get('data', {})
+                logs = full_res.get('logs', [])
+                
+                ma = data.get('hp', {}).get('ma', '')
                 status = 'NEW'
                 existing_hp = None
                 
@@ -60,20 +67,15 @@ class ImportExportService:
                     if row:
                         status = 'UPDATE'
                         existing_hp = dict(row)
-                else:
-                    # Check by NAME if MA is missing
-                    row = self.db.conn.execute("SELECT id, ma FROM hoc_phan WHERE ten_viet=?", (data['ten_viet'],)).fetchone()
-                    if row:
-                        status = 'UPDATE'
-                        existing_hp = dict(row)
                 
                 return {
                     'file_path': fpath,
                     'file_name': os.path.basename(fpath),
                     'data': data,
+                    'logs': logs,
                     'status': status,
                     'existing_hp': existing_hp,
-                    'selected': True
+                    'selected': True if status != 'ERROR' else False
                 }
             except Exception as e:
                 return {
@@ -103,23 +105,30 @@ class ImportExportService:
         results = {'success': 0, 'errors': 0, 'details': []}
         
         counter = 0
-        for item in selected_items:
-            try:
-                hp_id = word_import.import_single(self.db, item['data'], khoa_id=khoa_id)
-                results['success'] += 1
-                results['details'].append({
-                    'file': item['file_name'], 'status': 'ok', 'hp_id': hp_id,
-                    'ten': item['data']['ten_viet'], 'ma': item['data']['thong_tin'].get('ma', '')
-                })
-            except Exception as e:
-                results['errors'] += 1
-                results['details'].append({
-                    'file': item['file_name'], 'status': 'error', 'error': str(e)
-                })
-            
-            counter += 1
-            if progress_callback:
-                progress_callback(counter, total, item['file_name'], 'importing')
+        with self.db.transaction():
+            for item in selected_items:
+                try:
+                    hp_id, local_logs = word_import.import_single(self.db, item['data'], khoa_id=khoa_id)
+                    results['success'] += 1 if hp_id else 0
+                    if not hp_id: results['errors'] += 1
+                    
+                    results['details'].append({
+                        'file': item['file_name'], 
+                        'status': 'ok' if hp_id else 'error', 
+                        'hp_id': hp_id,
+                        'ten': item['data'].get('hp', {}).get('ten_viet') or item['file_name'],
+                        'ma': item['data'].get('hp', {}).get('ma', ''),
+                        'logs': local_logs
+                    })
+                except Exception as e:
+                    results['errors'] += 1
+                    results['details'].append({
+                        'file': item['file_name'], 'status': 'error', 'error': str(e)
+                    })
+                
+                counter += 1
+                if progress_callback:
+                    progress_callback(counter, total, item['file_name'], 'importing')
         
         # Log to DB
         self.db.add_import_export_log(

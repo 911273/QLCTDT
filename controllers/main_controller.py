@@ -106,17 +106,27 @@ class MainController:
         if not selected_items:
             return
 
-        # 3. Execute Import
-        def _on_import_progress(cur, total, name, phase):
-            self.view.update_progress(cur, total, f"Đang lưu: {name}")
+        # 3. Execute Import (Using existing thread utility)
+        from utils.threading_utils import run_threaded_task
+        try:
+            results = run_threaded_task(
+                self.view.root,
+                self.ie_service.execute_import,
+                title="Đang lưu dữ liệu vào Database...",
+                args=(selected_items, khoa_id)
+            )
+            self._on_import_finish(results)
+        except Exception as e:
+            self.view.show_error("Lỗi khi lưu dữ liệu", str(e))
 
-        self.view.show_progress_dialog("Đang lưu dữ liệu vào Database...")
-        results = self.ie_service.execute_import(selected_items, khoa_id, _on_import_progress)
-        self.view.close_progress_dialog()
-
+    def _on_import_finish(self, results):
         msg = f"Đã nhập xong!\nThành công: {results['success']}\nLỗi: {results['errors']}"
         self.view.show_info("Kết quả Nhập", msg)
-        return results
+        # Refresh current view if needed
+        if hasattr(self.view, 'refresh_current_view'):
+            self.view.refresh_current_view()
+        elif hasattr(self.view, 'load_hp_list'):
+            self.view.load_hp_list()
 
     def show_import_history(self):
         history = self.ie_service.db.get_import_export_history()

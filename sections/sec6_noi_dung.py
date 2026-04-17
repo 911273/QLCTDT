@@ -66,6 +66,9 @@ class Sec6NoiDung(BaseSection):
             row['hp_id'] = self.hp_id
             row['phan'] = 'th'
             self.db.add_noi_dung(row)
+            
+        # Tự động đồng bộ ngược lại Mục 1
+        self.db.calculate_and_update_hours(self.hp_id)
 
     def get_data_dict(self):
         self.ensure_ui()
