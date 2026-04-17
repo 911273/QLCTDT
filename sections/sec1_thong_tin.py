@@ -69,83 +69,75 @@ class Sec1ThongTin(BaseSection):
         tb.Separator(p, orient='horizontal').grid(
             row=1, column=0, columnspan=4, sticky='ew', padx=16, pady=4)
 
-        # ── Tên tiếng Việt ───────────────────────────────────────────────────
-        r = 2
-        tb.Label(p, text='Tên tiếng Việt:', font=('Arial', 10)
-                  ).grid(row=r, column=0, sticky='w', **pad)
-        tb.Entry(p, textvariable=self.v_ten_viet, width=60,
-                  font=('Arial', 10)).grid(row=r, column=1, columnspan=3, sticky='ew', **pad)
+        # ── 1.1 Thông tin Hành chính ──────────────────────────────────────────
+        admin_lf = tb.Labelframe(p, text='1.1. Thông tin hành chính học phần', padding=10)
+        admin_lf.grid(row=2, column=0, columnspan=4, sticky='ew', padx=16, pady=8)
 
-        r += 1
-        tb.Label(p, text='Tên tiếng Anh:', font=('Arial', 10)
-                  ).grid(row=r, column=0, sticky='w', **pad)
-        tb.Entry(p, textvariable=self.v_ten_anh, width=60,
-                  font=('Arial', 10)).grid(row=r, column=1, columnspan=3, sticky='ew', **pad)
+        tb.Label(admin_lf, text='Tên tiếng Việt:', font=('Arial', 10)
+                  ).grid(row=0, column=0, sticky='w', padx=5, pady=5)
+        tb.Entry(admin_lf, textvariable=self.v_ten_viet, width=60,
+                  font=('Arial', 10)).grid(row=0, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
 
-        r += 1
-        tb.Label(p, text='Đơn vị quản lý học phần:', font=('Arial', 10)
-                  ).grid(row=r, column=0, sticky='w', **pad)
-        self.cb_khoa = AutocompleteCombobox(p, textvariable=self.v_khoa, width=50,
+        tb.Label(admin_lf, text='Tên tiếng Anh:', font=('Arial', 10)
+                  ).grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        tb.Entry(admin_lf, textvariable=self.v_ten_anh, width=60,
+                  font=('Arial', 10)).grid(row=1, column=1, columnspan=3, sticky='ew', padx=5, pady=5)
+
+        tb.Label(admin_lf, text='Khoa quản lý:', font=('Arial', 10)
+                  ).grid(row=2, column=0, sticky='w', padx=5, pady=5)
+        self.cb_khoa = AutocompleteCombobox(admin_lf, textvariable=self.v_khoa, width=40,
                                      font=('Arial', 10), state='normal')
-        self.cb_khoa.grid(row=r, column=1, columnspan=3, sticky='ew', **pad)
-
-        r += 1
-        tb.Label(p, text='Trình độ đào tạo:', font=('Arial', 10)
-                  ).grid(row=r, column=0, sticky='w', **pad)
-        self.cb_trinh_do = AutocompleteCombobox(p, textvariable=self.v_trinh_do, values=list_levels, width=20,
+        self.cb_khoa.grid(row=2, column=1, sticky='ew', padx=5, pady=5)
+        
+        tb.Label(admin_lf, text='Bậc đào tạo:', font=('Arial', 10)
+                  ).grid(row=2, column=2, sticky='e', padx=5, pady=5)
+        self.cb_trinh_do = AutocompleteCombobox(admin_lf, textvariable=self.v_trinh_do, values=list_levels, width=15,
                       font=('Arial', 10), state='readonly')
-        self.cb_trinh_do.grid(row=r, column=1, columnspan=3, sticky='w', **pad)
+        self.cb_trinh_do.grid(row=2, column=3, sticky='w', padx=5, pady=5)
+        admin_lf.columnconfigure(1, weight=1)
 
-        r += 1
-        tb.Label(p, text='Ngành đào tạo & Bậc:', font=('Arial', 10)
-                  ).grid(row=r, column=0, sticky='nw', **pad)
-        
-        ct_frm = tb.Frame(p)
-        ct_frm.grid(row=r, column=1, columnspan=3, sticky='ew', **pad)
-        
+        # ── 1.2 Chương trình Đào tạo ────────────────────────────────────────
+        ctdt_lf = tb.Labelframe(p, text='1.2. Ngành đào tạo & Bậc (Chương trình)', padding=10)
+        ctdt_lf.grid(row=3, column=0, columnspan=4, sticky='ew', padx=16, pady=8)
+
         cols_ct   = ('bac', 'ten', 'khoi', 'cn')
         heads_ct  = ('Bậc', 'Chương trình đào tạo', 'Khối kiến thức', 'Chuyên ngành')
         widths_ct = (80, 250, 120, 150)
-        aligns_ct = ('center', 'w', 'w', 'center')
-        self.ct_list_frm, self.ct_tree = make_tree(ct_frm, cols_ct, heads_ct, widths_ct, height=3, column_aligns=aligns_ct, db=self.db, table_id='sec1_ctdt',
-                                                  undo_manager=self.undo_mgr, on_change=self.mark_modified)
+        self.ct_list_frm, self.ct_tree = make_tree(ctdt_lf, cols_ct, heads_ct, widths_ct, height=3, column_aligns=('center', 'w', 'w', 'center'), db=self.db, table_id='sec1_ctdt')
         self.ct_list_frm.pack(fill='x', expand=True)
         
-        ct_bf = tb.Frame(ct_frm)
-        ct_bf.pack(fill='x', pady=2)
-        tb.Button(ct_bf, text='➕ Gán vào CTĐT', command=self._ct_add).pack(side='left', padx=2)
-        tb.Button(ct_bf, text='🗑 Loại bỏ',       command=self._ct_remove).pack(side='left', padx=2)
+        ct_bf = tb.Frame(ctdt_lf)
+        ct_bf.pack(fill='x', pady=(4, 0))
+        tb.Button(ct_bf, text='➕ Gán vào CTĐT', command=self._ct_add, bootstyle='outline-primary').pack(side='left', padx=2)
+        tb.Button(ct_bf, text='🗑 Loại bỏ',       command=self._ct_remove, bootstyle='outline-danger').pack(side='left', padx=2)
+
+        r = 4
 
         p.columnconfigure(1, weight=1)
 
-        # ── Bảng Giảng viên ─────────────────────────────────────────────────
-        r += 1
-        tb.Label(p, text='Các giảng viên phụ trách học phần:',
-                  style='SubHeader.TLabel'
-                  ).grid(row=r, column=0, columnspan=4, sticky='w', padx=16, pady=(8, 2))
+        # ── 1.3 Giảng viên ──────────────────────────────────────────────────
+        gv_lf = tb.Labelframe(p, text='1.3. Các giảng viên phụ trách học phần', padding=10)
+        gv_lf.grid(row=r, column=0, columnspan=4, sticky='ew', padx=16, pady=8)
 
-        r += 1
-        gv_frame = tb.Frame(p)
-        gv_frame.grid(row=r, column=0, columnspan=4, sticky='ew', padx=16, pady=2)
-
-        cols   = ('stt', 'vai_tro', 'ho_ten', 'sdt', 'email')
-        heads  = ('TT', 'Vai trò', 'Học hàm, Học vị, Họ và tên', 'Số ĐT', 'Email')
-        widths = (35, 140, 250, 110, 200)
-        aligns = ('center', 'w', 'w', 'center', 'center')
-        self.gv_frm, self.gv_tree = make_tree(gv_frame, cols, heads, widths, height=6, column_aligns=aligns, db=self.db, table_id='sec1_gv',
+        cols   = ('stt', 'vai_tro', 'ho_ten', 'don_vi', 'sdt', 'email')
+        heads  = ('TT', 'Vai trò', 'Học hàm, Học vị, Họ và tên', 'Đơn vị công tác', 'Số ĐT', 'Email')
+        widths = (35, 140, 250, 150, 110, 180)
+        aligns = ('center', 'w', 'w', 'w', 'center', 'center')
+        self.gv_frm, self.gv_tree = make_tree(gv_lf, cols, heads, widths, height=6, column_aligns=aligns, db=self.db, table_id='sec1_gv',
                                                undo_manager=self.undo_mgr, on_change=self.mark_modified)
         self.gv_frm.pack(fill='x', expand=True)
         self.gv_tree.bind('<Double-1>', lambda _e: self._gv_edit())
 
-        gv_bf = tb.Frame(gv_frame)
+        gv_bf = tb.Frame(gv_lf)
         gv_bf.pack(fill='x', pady=(4, 0))
-        tb.Button(gv_bf, text='➕ Thêm GV',  command=self._gv_add).pack(side='left', padx=4)
-        tb.Button(gv_bf, text='✏ Sửa',       command=self._gv_edit).pack(side='left', padx=4)
-        tb.Button(gv_bf, text='🗑 Xóa',       command=self._gv_delete).pack(side='left', padx=4)
-        tb.Button(gv_bf, text='⬆ Lên',       command=lambda: self._gv_move(-1)).pack(side='left', padx=4)
-        tb.Button(gv_bf, text='⬇ Xuống',     command=lambda: self._gv_move(1)).pack(side='left', padx=4)
+        tb.Button(gv_bf, text='➕ Thêm GV',  command=self._gv_add, bootstyle='success-outline').pack(side='left', padx=2)
+        tb.Button(gv_bf, text='✏ Sửa',       command=self._gv_edit, bootstyle='info-outline').pack(side='left', padx=2)
+        tb.Button(gv_bf, text='🗑 Xóa',       command=self._gv_delete, bootstyle='danger-outline').pack(side='left', padx=2)
+        tb.Button(gv_bf, text='⬆ Lên',       command=lambda: self._gv_move(-1)).pack(side='left', padx=2)
+        tb.Button(gv_bf, text='⬇ Xuống',     command=lambda: self._gv_move(1)).pack(side='left', padx=2)
         tb.Button(gv_bf, text='👥 Chọn từ Danh sách',
-                   command=self._gv_pick).pack(side='left', padx=8)
+                   command=self._gv_pick, bootstyle='outline-secondary').pack(side='right', padx=2)
+        r += 1
 
         # ── Thông tin học phần ───────────────────────────────────────────────
         r += 1
@@ -184,9 +176,13 @@ class Sec1ThongTin(BaseSection):
         time_lf = tb.Labelframe(p, text='Phân bổ thời gian', padding=8)
         time_lf.grid(row=r, column=0, columnspan=4, sticky='ew', padx=16, pady=4)
         
-        btn_sync = tb.Button(time_lf, text='🔄 Tự động cập nhật từ Nội dung chi tiết', 
-                               style='Accent.TButton', command=self._sync_hours)
-        btn_sync.grid(row=0, column=0, columnspan=2, sticky='w', padx=6, pady=(0, 10))
+        btn_sync = tb.Button(time_lf, text='🔄 Đồng bộ từ Mục 6', 
+                               bootstyle='outline-info', command=self._sync_hours)
+        btn_sync.grid(row=0, column=0, sticky='w', padx=6, pady=(0, 10))
+
+        btn_calc = tb.Button(time_lf, text='🧮 Tự động tính Tự học', 
+                               bootstyle='outline-success', command=self._auto_calc_hours)
+        btn_calc.grid(row=0, column=1, sticky='w', padx=6, pady=(0, 10))
 
         time_rows = [
             ('gio_lt',      'Lý thuyết, Bài tập, Kiểm tra:'),
@@ -227,6 +223,26 @@ class Sec1ThongTin(BaseSection):
         self.auto_track_vars(self.v_ten_viet, self.v_ten_anh, self.v_khoa, self.v_trinh_do,
                              self.v_ma, self.v_tc, self.v_loai, self.v_tinh_chat,
                              self.v_co_thuc_hanh, self.v_tq, self.v_tt, *self._time_vars.values())
+
+    def _auto_calc_hours(self):
+        """Tính giờ tự học dựa trên số tín chỉ: 1 TC = 45 giờ học tập (bao gồm cả tự học)."""
+        try:
+            tc = int(self.v_tc.get() or 3)
+            tong_quy_dinh = tc * 45
+            
+            # Tính tổng giờ tiếp xúc
+            contact_keys = ['gio_lt', 'gio_th_tn', 'gio_tl', 'gio_bt', 'gio_tieu_luan', 'gio_thuc_tap']
+            total_contact = 0
+            for k in contact_keys:
+                total_contact += int(self._time_vars[k].get() or 0)
+            
+            # Giờ tự học = Tổng quy định - Tổng tiếp xúc
+            tu_hoc = max(0, tong_quy_dinh - total_contact)
+            self._time_vars['gio_tu_hoc'].set(str(tu_hoc))
+            self._time_vars['tong_gio'].set(str(tong_quy_dinh))
+            show_modern_warning(self, 'Thông báo', f'Đã tính toán:\n- Tổng giờ định mức ({tc} TC): {tong_quy_dinh}\n- Giờ tự học: {tu_hoc}')
+        except Exception as e:
+            show_modern_warning(self, 'Lỗi', str(e))
 
     def _sync_hours(self):
         """Đồng bộ số giờ từ Mục 6."""
@@ -280,10 +296,19 @@ class Sec1ThongTin(BaseSection):
             var.set(str(hp[key] or 0))
 
         gvs = self.db.get_gv_of_hp(hp_id)
-        self._gv_rows = [{'gv_id': r['gv_id'], 'ho_ten': r['ho_ten'],
-                           'hoc_vi': r['hoc_vi'] or '', 'sdt': r['sdt'] or '',
-                           'email': r['email'] or '', 'vai_tro': r['vai_tro'],
-                           'thu_tu': r['thu_tu']} for r in gvs]
+        self._gv_rows = []
+        for r in gvs:
+            rd = dict(r)
+            self._gv_rows.append({
+                'gv_id': rd.get('gv_id') or rd.get('master_gv_id'), 
+                'ho_ten': rd.get('ho_ten', ''),
+                'hoc_vi': rd.get('hoc_ham_vi') or rd.get('hoc_vi') or '', 
+                'don_vi': rd.get('don_vi') or '',
+                'sdt': rd.get('sdt') or '',
+                'email': rd.get('email') or '', 
+                'vai_tro': rd.get('vai_tro'),
+                'thu_tu': rd.get('thu_tu')
+            })
         self._gv_refresh()
         self._initial_data = self.get_data_dict()
 
@@ -435,17 +460,19 @@ class Sec1ThongTin(BaseSection):
                                 values=(stt_c[vr],
                                         VAI_TRO_LABEL.get(vr, vr),
                                         ho_ten_full,
+                                        r.get('don_vi', ''),
                                         r.get('sdt', ''),
                                         r.get('email', '')),
                                 tags=(tag,))
 
     def _gv_fields(self, initial=None):
         return [
-            ('ho_ten',  'Họ và tên',    'entry', {}),
-            ('hoc_vi',  'Học vị/Học hàm', 'entry', {}),
-            ('sdt',     'Số điện thoại', 'entry', {}),
-            ('email',   'Email',         'entry', {}),
-            ('vai_tro', 'Vai trò',       'combo', {'values': list(VAI_TRO_LABEL.values())}),
+            ('ho_ten',  'Họ và tên',      'entry', {}),
+            ('hoc_vi',  'Học hàm, học vị', 'entry', {}),
+            ('don_vi',  'Đơn vị công tác', 'entry', {}),
+            ('sdt',     'Số điện thoại',  'entry', {}),
+            ('email',   'Email',          'entry', {}),
+            ('vai_tro', 'Vai trò',        'combo', {'values': list(VAI_TRO_LABEL.values())}),
         ]
 
     def _gv_add(self):
@@ -457,6 +484,7 @@ class Sec1ThongTin(BaseSection):
             self._gv_rows.append({'gv_id': None,
                                    'ho_ten': dlg.result.get('ho_ten', ''),
                                    'hoc_vi': dlg.result.get('hoc_vi', ''),
+                                   'don_vi': dlg.result.get('don_vi', ''),
                                    'sdt': dlg.result.get('sdt', ''),
                                    'email': dlg.result.get('email', ''),
                                    'vai_tro': vai_tro,
@@ -477,6 +505,7 @@ class Sec1ThongTin(BaseSection):
             vr_label = dlg.result.get('vai_tro', '')
             vai_tro = 'chinh' if 'chính' in vr_label else 'tham_gia'
             row.update({'ho_ten': dlg.result['ho_ten'], 'hoc_vi': dlg.result['hoc_vi'],
+                        'don_vi': dlg.result.get('don_vi', ''),
                         'sdt': dlg.result['sdt'], 'email': dlg.result['email'],
                         'vai_tro': vai_tro})
             self._gv_refresh()
@@ -520,12 +549,23 @@ class Sec1ThongTin(BaseSection):
             self._gv_rows.append({'gv_id': gv['id'],
                                    'ho_ten': gv['ho_ten'],
                                    'hoc_vi': gv['hoc_vi'] or '',
+                                   'don_vi': gv.get('don_vi') or '',
                                    'sdt': gv['sdt'] or '',
                                    'email': gv['email'] or '',
                                    'vai_tro': vai_tro,
                                    'thu_tu': len(self._gv_rows)+1})
             self._gv_refresh()
             self.mark_modified()
+
+    def get_time_allocation(self):
+        """Trả về dict chứa phân bổ giờ từ Mục 1 để đối soát."""
+        res = {}
+        for k, v in self._time_vars.items():
+            try:
+                res[k] = float(v.get() or 0)
+            except:
+                res[k] = 0.0
+        return res
 
 
 class _AddCtdtToHpDialog(tb.Toplevel):

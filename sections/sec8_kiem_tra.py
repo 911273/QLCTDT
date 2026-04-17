@@ -12,6 +12,8 @@ class Sec8KiemTra(BaseSection):
     def __init__(self, parent, db, **kwargs):
         super().__init__(parent, db, **kwargs)
         self._kt_rows = []
+        self._rubric_list = []     # [{'ten','ky_hieu','mo_ta','thu_tu','tieu_chi_list':[...]}]
+        self._sel_rubric_idx = None
         self._task_vars = {}
         self.v_tx_pct = tk.StringVar(value='30')
         self.v_ck_pct = tk.StringVar(value='70')
@@ -81,23 +83,26 @@ class Sec8KiemTra(BaseSection):
         grid_tasks.columnconfigure(1, weight=1)
 
         # ── 8.2 Kế hoạch kiểm tra ─────────────────────────────────────────
-        lf2 = tb.Labelframe(p, text='8.2. Kế hoạch kiểm tra', padding=10)
+        lf2 = tb.Labelframe(p, text='8.2. Kế hoạch kiểm tra – đánh giá', padding=10)
         lf2.pack(fill='both', expand=True, padx=16, pady=(0, 8))
 
         lbl2_frm = tb.Frame(lf2)
         lbl2_frm.pack(fill='x', pady=(0, 4))
-        tb.Label(lbl2_frm, text='8.2. Phương pháp, hình thức kiểm tra - đánh giá học phần',
+        tb.Label(lbl2_frm, text='Phương pháp, hình thức kiểm tra - đánh giá học phần (theo mẫu DCCTHP mới)',
                   font=('Arial', 10)).pack(side='left')
         tb.Button(lbl2_frm, text='🪄 Điền ma trận mẫu', bootstyle='outline-info', 
                    command=self._auto_fill_assessment, padding=2).pack(side='right')
 
-        cols   = ('nhom', 'thu_tu', 'noi_dung', 'hinh_thuc',
-                  'thoi_gian', 'thang_diem', 'cap_do', 'ty_trong')
-        heads  = ('Nhóm', 'TT', 'Nội dung', 'Hình thức',
-                  'Thời gian', 'Thang điểm', 'Mức độ đáp ứng CDR', 'Tỷ trọng')
-        widths = (80, 40, 180, 90, 80, 80, 160, 70)
-        aligns = ('center', 'center', 'w', 'center', 'center', 'center', 'w', 'center')
-        self.kt_frm, self.kt_tree = make_tree(lf2, cols, heads, widths, height=10, column_aligns=aligns, db=self.db, table_id='sec8_kiem_tra')
+        # 8 cột theo mẫu DCCTHP mới
+        cols   = ('nhom', 'ty_trong_nhom', 'noi_dung', 'hinh_thuc',
+                  'tieu_chi', 'clo_lien_quan', 'diem_toi_da_cdr', 'trong_so_cdr')
+        heads  = ('Thành phần ĐG', 'Trọng số HP (%)', 'Bài đánh giá', 'Hình thức',
+                  'Tiêu chí ĐG', 'CĐR được ĐG', 'Ðiểm tối đa CĐR', 'Trọng số CĐR (%)')
+        widths = (110, 80, 160, 80, 120, 80, 100, 100)
+        aligns = ('w', 'center', 'w', 'center', 'w', 'center', 'center', 'center')
+        self.kt_frm, self.kt_tree = make_tree(lf2, cols, heads, widths, height=10,
+                                               column_aligns=aligns, db=self.db,
+                                               table_id='sec8_kiem_tra')
         self.kt_frm.pack(fill='both', expand=True)
         self.kt_tree.bind('<Double-1>', lambda _e: self._kt_edit())
 
@@ -114,24 +119,77 @@ class Sec8KiemTra(BaseSection):
 
         tb.Label(lf2, text='Tỷ trọng KT thường xuyên (%):', font=('Arial', 10)
                   ).pack(anchor='w', pady=(8, 0))
-        # Using self.v_tx_pct from __init__
         tb.Entry(lf2, textvariable=self.v_tx_pct, width=8,
                   font=('Arial', 10)).pack(anchor='w')
 
         tb.Label(lf2, text='Tỷ trọng thi cuối kỳ (%):', font=('Arial', 10)
                   ).pack(anchor='w', pady=(4, 0))
-        # Using self.v_ck_pct from __init__
         tb.Entry(lf2, textvariable=self.v_ck_pct, width=8,
                   font=('Arial', 10)).pack(anchor='w')
 
+        # ── 8.3 Rubric đánh giá ───────────────────────────────────────────
+        lf3 = tb.Labelframe(p, text='8.3. Rubric đánh giá', padding=10)
+        lf3.pack(fill='both', expand=True, padx=16, pady=(0, 12))
+
+        tb.Label(lf3, text='Danh sách Rubric (tiêu chí chấm điểm chi tiết theo mẫu DCCTHP):',
+                  font=('Arial', 10, 'italic')).pack(anchor='w', pady=(0, 4))
+
+        # Bảng trái: danh sách rubric
+        rubric_pane = tb.Frame(lf3)
+        rubric_pane.pack(fill='both', expand=True)
+
+        left_frm = tb.Labelframe(rubric_pane, text='Danh sách Rubric', padding=6)
+        left_frm.pack(side='left', fill='both', padx=(0, 6))
+
+        rb_cols   = ('ky_hieu', 'ten')
+        rb_heads  = ('Ký hiệu', 'Tên Rubric')
+        rb_widths = (60, 200)
+        self.rb_list_frm, self.rb_tree = make_tree(left_frm, rb_cols, rb_heads,
+                                                    rb_widths, height=6,
+                                                    db=self.db, table_id='sec8_rubric')
+        self.rb_list_frm.pack(fill='both', expand=True)
+        self.rb_tree.bind('<<TreeviewSelect>>', lambda _e: self._on_rubric_select())
+
+        rb_bf = tb.Frame(left_frm)
+        rb_bf.pack(fill='x', pady=(4, 0))
+        tb.Button(rb_bf, text='➕ Thêm', command=self._rubric_add).pack(side='left', padx=2)
+        tb.Button(rb_bf, text='✏ Sửa',  command=self._rubric_edit).pack(side='left', padx=2)
+        tb.Button(rb_bf, text='🗑 Xóa',  command=self._rubric_delete).pack(side='left', padx=2)
+
+        # Bảng phải: tiêu chí của rubric đang chọn
+        right_frm = tb.Labelframe(rubric_pane, text='Tiêu chí của Rubric đang chọn', padding=6)
+        right_frm.pack(side='left', fill='both', expand=True)
+
+        tc_cols   = ('tieu_chi', 'trong_so', 'muc_xuat_sac', 'muc_tot', 'muc_dat', 'muc_chua_dat')
+        tc_heads  = ('Tiêu chí', 'Trọng số', 'Xuất sắc (9-10)', 'Tốt (7-8.9)', 'Đạt (5-6.9)', 'Chưa đạt (0-4.9)')
+        tc_widths = (130, 60, 120, 120, 120, 120)
+        self.tc_list_frm, self.tc_tree = make_tree(right_frm, tc_cols, tc_heads,
+                                                    tc_widths, height=6,
+                                                    db=self.db, table_id='sec8_rubric_tc')
+        self.tc_list_frm.pack(fill='both', expand=True)
+        self.tc_tree.bind('<Double-1>', lambda _e: self._tc_edit())
+
+        tc_bf = tb.Frame(right_frm)
+        tc_bf.pack(fill='x', pady=(4, 0))
+        tb.Button(tc_bf, text='➕ Thêm tiêu chí', command=self._tc_add).pack(side='left', padx=2)
+        tb.Button(tc_bf, text='✏ Sửa',            command=self._tc_edit).pack(side='left', padx=2)
+        tb.Button(tc_bf, text='🗑 Xóa',            command=self._tc_delete).pack(side='left', padx=2)
+        tb.Button(tc_bf, text='📋 Điền mẫu nhanh', bootstyle='outline-info',
+                   command=self._tc_auto_fill).pack(side='left', padx=8)
+
+    # ─── Kế hoạch KT ─────────────────────────────────────────────────────────
     def _kt_fields(self, nhom):
         return [
-            ('noi_dung',   'Nội dung',                     'text',  {}),
-            ('hinh_thuc',  'Hình thức',                    'entry', {}),
-            ('thoi_gian',  'Thời gian',                    'entry', {}),
-            ('thang_diem', 'Thang điểm',                   'entry', {}),
-            ('cap_do',     'Mức độ đáp ứng CDR học phần',  'entry', {}),
-            ('ty_trong',   'Tỷ trọng (%)',                 'entry', {}),
+            ('noi_dung',          'Bài đánh giá',                    'text',  {}),
+            ('hinh_thuc',         'Hình thức đánh giá',              'entry', {}),
+            ('tieu_chi',          'Tiêu chí đánh giá (mã Rubric)',   'entry', {}),
+            ('clo_lien_quan',     'CĐR được đánh giá',               'entry', {}),
+            ('diem_toi_da_cdr',   'Điểm tối đa của CĐR',            'entry', {}),
+            ('trong_so_cdr',      'Trọng số đánh giá theo CĐR (%)', 'entry', {}),
+            ('thoi_gian',         'Thời gian',                       'entry', {}),
+            ('thang_diem',        'Thang điểm',                      'entry', {}),
+            ('cap_do',            'Mức độ đáp ứng CDR học phần',     'entry', {}),
+            ('ty_trong',          'Tỷ trọng (%)',                    'entry', {}),
         ]
 
     def _kt_refresh(self, rows):
@@ -152,13 +210,13 @@ class Sec8KiemTra(BaseSection):
                     r_idx += 1
                     self.kt_tree.insert('', 'end', iid=str(rows.index(r)),
                                         values=(r.get('nhom', ''),
-                                                r.get('thu_tu', ''),
+                                                r.get('ty_trong_nhom', ''),
                                                 r.get('noi_dung', ''),
                                                 r.get('hinh_thuc', ''),
-                                                r.get('thoi_gian', ''),
-                                                r.get('thang_diem', ''),
-                                                r.get('cap_do', ''),
-                                                r.get('ty_trong', '')),
+                                                r.get('tieu_chi', ''),
+                                                r.get('clo_lien_quan', ''),
+                                                r.get('diem_toi_da_cdr', ''),
+                                                r.get('trong_so_cdr', '')),
                                         tags=(tag,))
         self._kt_rows = rows
 
@@ -172,14 +230,22 @@ class Sec8KiemTra(BaseSection):
                 if val:
                     txt.insert('1.0', val)
         rows = self.db.get_ke_hoach_kt(hp_id)
-        self._kt_rows = [{'nhom': r['nhom'], 'thy_trong_nhom': r['ty_trong_nhom'],
+        self._kt_rows = [{'nhom': r['nhom'], 'ty_trong_nhom': r['ty_trong_nhom'],
                            'thu_tu': r['thu_tu'], 'noi_dung': r['noi_dung'],
                            'hinh_thuc': r['hinh_thuc'], 'thoi_gian': r['thoi_gian'],
                            'thang_diem': r['thang_diem'],
                            'cap_do': r['cap_do_dap_ung'],
                            'clo_lien_quan': r['clo_lien_quan'],
+                           'tieu_chi': r['tieu_chi_danh_gia'] if 'tieu_chi_danh_gia' in r.keys() else '',
+                           'diem_toi_da_cdr': r['diem_toi_da_cdr'] if 'diem_toi_da_cdr' in r.keys() else '',
+                           'trong_so_cdr': r['trong_so_cdr'] if 'trong_so_cdr' in r.keys() else '',
                            'ty_trong': r['ty_trong']} for r in rows]
         self._kt_refresh(self._kt_rows)
+
+        # Load rubric
+        self._rubric_list = [dict(rb) | {'tieu_chi_list': [dict(tc) for tc in self.db.get_rubric_tieu_chi(rb['id'])]}
+                              for rb in self.db.get_rubric_by_hp(hp_id)]
+        self._rb_refresh()
 
     def save(self):
         if self.hp_id is not None:
@@ -200,8 +266,11 @@ class Sec8KiemTra(BaseSection):
                               'thang_diem': r.get('thang_diem', ''),
                               'cap_do_dap_ung': r.get('cap_do', ''),
                               'clo_lien_quan': r.get('clo_lien_quan', ''),
+                              'tieu_chi_danh_gia': r.get('tieu_chi', ''),
+                              'diem_toi_da_cdr': r.get('diem_toi_da_cdr', ''),
+                              'trong_so_cdr': r.get('trong_so_cdr', ''),
                               'ty_trong': r.get('ty_trong', '')})
-        return {**task_data, 'rows': items}
+        return {**task_data, 'rows': items, 'rubric_list': self._rubric_list}
 
     def clear(self):
         super().clear()
@@ -209,6 +278,12 @@ class Sec8KiemTra(BaseSection):
             txt.delete('1.0', 'end')
         self.kt_tree.delete(*self.kt_tree.get_children())
         self._kt_rows = []
+        self._rubric_list = []
+        self._sel_rubric_idx = None
+        if hasattr(self, 'rb_tree'):
+            self.rb_tree.delete(*self.rb_tree.get_children())
+        if hasattr(self, 'tc_tree'):
+            self.tc_tree.delete(*self.tc_tree.get_children())
 
     def _kt_add(self, nhom):
         dlg = RowEditDialog(self, f'Thêm kiểm tra', self._kt_fields(nhom))
@@ -221,6 +296,10 @@ class Sec8KiemTra(BaseSection):
                                    'thoi_gian': dlg.result.get('thoi_gian', ''),
                                    'thang_diem': dlg.result.get('thang_diem', ''),
                                    'cap_do': dlg.result.get('cap_do', ''),
+                                   'clo_lien_quan': dlg.result.get('clo_lien_quan', ''),
+                                   'tieu_chi': dlg.result.get('tieu_chi', ''),
+                                   'diem_toi_da_cdr': dlg.result.get('diem_toi_da_cdr', ''),
+                                   'trong_so_cdr': dlg.result.get('trong_so_cdr', ''),
                                    'ty_trong': dlg.result.get('ty_trong', '')})
             self._kt_refresh(self._kt_rows)
 
@@ -253,6 +332,153 @@ class Sec8KiemTra(BaseSection):
             self._kt_rows.pop(idx)
             self._kt_refresh(self._kt_rows)
 
+    # ─── Rubric ───────────────────────────────────────────────────────────────
+    def _rubric_fields(self):
+        return [
+            ('ky_hieu', 'Ký hiệu (VD: R1, R2)', 'entry', {}),
+            ('ten',     'Tên Rubric',            'entry', {}),
+            ('mo_ta',   'Mô tả ngắn',            'entry', {}),
+        ]
+
+    def _tc_fields(self):
+        return [
+            ('tieu_chi',     'Tên tiêu chí',          'entry', {}),
+            ('trong_so',     'Trọng số (VD: 40%)',     'entry', {}),
+            ('muc_xuat_sac', 'Mức Xuất sắc (9.0–10)', 'text',  {}),
+            ('muc_tot',      'Mức Tốt (7.0–8.9)',      'text',  {}),
+            ('muc_dat',      'Mức Đạt (5.0–6.9)',       'text',  {}),
+            ('muc_chua_dat', 'Mức Chưa đạt (0–4.9)',   'text',  {}),
+        ]
+
+    def _rb_refresh(self):
+        if not hasattr(self, 'rb_tree'): return
+        self.rb_tree.delete(*self.rb_tree.get_children())
+        for i, rb in enumerate(self._rubric_list):
+            tag = 'even' if i % 2 == 0 else 'odd'
+            self.rb_tree.insert('', 'end', iid=str(i),
+                                values=(rb.get('ky_hieu', ''), rb.get('ten', '')),
+                                tags=(tag,))
+
+    def _tc_refresh(self):
+        if not hasattr(self, 'tc_tree'): return
+        self.tc_tree.delete(*self.tc_tree.get_children())
+        if self._sel_rubric_idx is None: return
+        tcs = self._rubric_list[self._sel_rubric_idx].get('tieu_chi_list', [])
+        for i, tc in enumerate(tcs):
+            tag = 'even' if i % 2 == 0 else 'odd'
+            self.tc_tree.insert('', 'end', iid=str(i),
+                                values=(tc.get('tieu_chi', ''), tc.get('trong_so', ''),
+                                        tc.get('muc_xuat_sac', ''), tc.get('muc_tot', ''),
+                                        tc.get('muc_dat', ''), tc.get('muc_chua_dat', '')),
+                                tags=(tag,))
+
+    def _on_rubric_select(self):
+        sel = self.rb_tree.selection()
+        if sel:
+            try:
+                self._sel_rubric_idx = int(sel[0])
+                self._tc_refresh()
+            except (ValueError, IndexError):
+                self._sel_rubric_idx = None
+
+    def _rubric_add(self):
+        dlg = RowEditDialog(self, 'Thêm Rubric', self._rubric_fields())
+        if dlg.result:
+            self._rubric_list.append({
+                'ky_hieu': dlg.result.get('ky_hieu', ''),
+                'ten':     dlg.result.get('ten', ''),
+                'mo_ta':   dlg.result.get('mo_ta', ''),
+                'thu_tu':  len(self._rubric_list) + 1,
+                'tieu_chi_list': []
+            })
+            self._rb_refresh()
+
+    def _rubric_edit(self):
+        sel = self.rb_tree.selection()
+        if not sel: return
+        try: idx = int(sel[0])
+        except ValueError: return
+        rb = self._rubric_list[idx]
+        dlg = RowEditDialog(self, 'Sửa Rubric', self._rubric_fields(), initial=rb)
+        if dlg.result:
+            rb.update({k: dlg.result[k] for k in ('ky_hieu', 'ten', 'mo_ta') if k in dlg.result})
+            self._rb_refresh()
+
+    def _rubric_delete(self):
+        sel = self.rb_tree.selection()
+        if not sel: return
+        try: idx = int(sel[0])
+        except ValueError: return
+        if ask_modern_yesno(self, 'Xác nhận', 'Xóa Rubric này và tất cả tiêu chí?'):
+            self._rubric_list.pop(idx)
+            self._sel_rubric_idx = None
+            self._rb_refresh()
+            self._tc_refresh()
+
+    def _tc_add(self):
+        if self._sel_rubric_idx is None:
+            show_modern_warning(self, 'Chưa chọn', 'Vui lòng chọn Rubric trước.')
+            return
+        dlg = RowEditDialog(self, 'Thêm tiêu chí', self._tc_fields())
+        if dlg.result:
+            tcs = self._rubric_list[self._sel_rubric_idx].setdefault('tieu_chi_list', [])
+            tcs.append({**dlg.result, 'thu_tu': len(tcs) + 1})
+            self._tc_refresh()
+
+    def _tc_edit(self):
+        if self._sel_rubric_idx is None: return
+        sel = self.tc_tree.selection()
+        if not sel: return
+        try: idx = int(sel[0])
+        except ValueError: return
+        tcs = self._rubric_list[self._sel_rubric_idx].get('tieu_chi_list', [])
+        if idx >= len(tcs): return
+        dlg = RowEditDialog(self, 'Sửa tiêu chí', self._tc_fields(), initial=tcs[idx])
+        if dlg.result:
+            tcs[idx].update(dlg.result)
+            self._tc_refresh()
+
+    def _tc_delete(self):
+        if self._sel_rubric_idx is None: return
+        sel = self.tc_tree.selection()
+        if not sel: return
+        try: idx = int(sel[0])
+        except ValueError: return
+        tcs = self._rubric_list[self._sel_rubric_idx].get('tieu_chi_list', [])
+        if ask_modern_yesno(self, 'Xác nhận', 'Xóa tiêu chí này?'):
+            tcs.pop(idx)
+            self._tc_refresh()
+
+    def _tc_auto_fill(self):
+        """Điền mẫu tiêu chí nhanh cho rubric đang chọn."""
+        if self._sel_rubric_idx is None:
+            show_modern_warning(self, 'Chưa chọn', 'Vui lòng chọn Rubric trước.')
+            return
+        rb = self._rubric_list[self._sel_rubric_idx]
+        if rb.get('tieu_chi_list'):
+            if not ask_modern_yesno(self, 'Xác nhận', 'Xóa tiêu chí hiện tại và điền mẫu?'):
+                return
+        rb['tieu_chi_list'] = [
+            {'tieu_chi': 'Nội dung kiến thức', 'trong_so': '40%',
+             'muc_xuat_sac': 'Đầy đủ, chính xác, có ví dụ minh họa',
+             'muc_tot': 'Đúng các ý chính, thiếu ví dụ',
+             'muc_dat': 'Đúng cơ bản, còn thiếu sót',
+             'muc_chua_dat': 'Sai hoặc thiếu nghiêm trọng', 'thu_tu': 1},
+            {'tieu_chi': 'Trình bày, lập luận', 'trong_so': '30%',
+             'muc_xuat_sac': 'Logic, rõ ràng, thuật ngữ chính xác',
+             'muc_tot': 'Rõ ràng nhưng chưa chặt chẽ',
+             'muc_dat': 'Thiếu ý hoặc chưa rõ cấu trúc',
+             'muc_chua_dat': 'Rời rạc, khó hiểu', 'thu_tu': 2},
+            {'tieu_chi': 'Liên hệ thực tế / vận dụng', 'trong_so': '30%',
+             'muc_xuat_sac': 'Liên hệ đúng, phù hợp, có sáng tạo',
+             'muc_tot': 'Có liên hệ nhưng chưa sâu',
+             'muc_dat': 'Liên hệ hạn chế',
+             'muc_chua_dat': 'Không có hoặc sai', 'thu_tu': 3},
+        ]
+        self._tc_refresh()
+        show_modern_info(self, 'Hoàn thành', 'Đã điền 3 tiêu chí mẫu.')
+
+    # ─── Auto-fill ───────────────────────────────────────────────────────────
     def _auto_fill_nhiem_vu(self):
         if not self.hp_id: return
         hp = self.db.get_hoc_phan(self.hp_id)
@@ -289,6 +515,10 @@ class Sec8KiemTra(BaseSection):
                 'thoi_gian': 'Theo KMH',
                 'thang_diem': 10,
                 'cap_do': '',
+                'clo_lien_quan': '',
+                'tieu_chi': '',
+                'diem_toi_da_cdr': '',
+                'trong_so_cdr': '',
                 'ty_trong': s['ty_trong']
             })
         self._kt_rows = new_rows

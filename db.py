@@ -3,10 +3,24 @@ import sqlite3
 import os
 import shutil
 import threading
+import re
 from datetime import datetime
 from contextlib import contextmanager
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'qlctdt.db')
+
+def unaccent_vietnamese(s):
+    if not s: return ""
+    if not isinstance(s, str): s = str(s)
+    s = s.lower()
+    s = re.sub('[áàảãạâấầẩẫậăắằẳẵặ]', 'a', s)
+    s = re.sub('[éèẻẽẹêếềểễệ]', 'e', s)
+    s = re.sub('[íìỉĩị]', 'i', s)
+    s = re.sub('[óòỏõọôốồổỗộơớờởỡợ]', 'o', s)
+    s = re.sub('[úùủũụưứừửữự]', 'u', s)
+    s = re.sub('[ýỳỷỹỵ]', 'y', s)
+    s = re.sub('đ', 'd', s)
+    return s
 
 SCHEMA_SQL = """
 PRAGMA foreign_keys = ON;
@@ -92,15 +106,23 @@ CREATE TABLE IF NOT EXISTS hoc_phan (
     ho_ten_ky_phai       TEXT,
     nganh                TEXT,
     chuyen_nganh         TEXT,
-    khoi_kien_thuc       TEXT
+    khoi_kien_thuc       TEXT,
+    quy_dinh_hp          TEXT,
+    co_so_vat_chat       TEXT,
+    phu_luc              TEXT
 );
 
 CREATE TABLE IF NOT EXISTS hp_giang_vien (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    hp_id   INTEGER REFERENCES hoc_phan(id) ON DELETE CASCADE,
-    gv_id   INTEGER REFERENCES giang_vien(id),
-    vai_tro TEXT DEFAULT 'chinh',
-    thu_tu  INTEGER DEFAULT 1
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    hp_id        INTEGER REFERENCES hoc_phan(id) ON DELETE CASCADE,
+    gv_id        INTEGER REFERENCES giang_vien(id),
+    ho_ten       TEXT,       -- Để lưu tên nếu không link gv_id
+    hoc_ham_vi   TEXT,       -- Học hàm, học vị
+    don_vi       TEXT,       -- Đơn vị công tác
+    email        TEXT,
+    sdt          TEXT,
+    vai_tro      TEXT DEFAULT 'tham_gia',
+    thu_tu       INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS muc_tieu (
@@ -120,6 +142,7 @@ CREATE TABLE IF NOT EXISTS clo (
     ma    TEXT,
     mo_ta TEXT,
     cdr_ma TEXT,
+    level_irm TEXT,   -- New: I/R/M
     -- New fields
     nhom             TEXT,
     la_tieu_de_nhom  INTEGER DEFAULT 0
@@ -165,7 +188,10 @@ CREATE TABLE IF NOT EXISTS noi_dung (
     yeu_cau   TEXT,
     cdr_ma    TEXT,
     -- New fields
-    loai      TEXT DEFAULT 'thuong'
+    loai            TEXT DEFAULT 'thuong',
+    pp_day          TEXT,
+    pp_hoc          TEXT,
+    bai_danh_gia    TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ke_hoach_kiem_tra (
@@ -180,7 +206,10 @@ CREATE TABLE IF NOT EXISTS ke_hoach_kiem_tra (
     thang_diem      REAL,
     cap_do_dap_ung  TEXT,
     clo_lien_quan   TEXT,
-    ty_trong        REAL
+    ty_trong        REAL,
+    tieu_chi_danh_gia TEXT,
+    diem_toi_da_cdr  TEXT,
+    trong_so_cdr     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS lich_su_cap_nhat (
@@ -202,6 +231,27 @@ CREATE TABLE IF NOT EXISTS word_template (
     config_json TEXT,
     la_mac_dinh INTEGER DEFAULT 0,
     ngay_tao    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS rubric_danh_gia (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    hp_id       INTEGER REFERENCES hoc_phan(id) ON DELETE CASCADE,
+    ten         TEXT,       -- Tên rubric, VD: "Rubric R1 - Bài tập tự luận"
+    ky_hieu     TEXT,       -- Ký hiệu ngắn, VD: "R1"
+    mo_ta       TEXT,       -- Mô tả ngắn
+    thu_tu      INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS rubric_tieu_chi (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    rubric_id         INTEGER REFERENCES rubric_danh_gia(id) ON DELETE CASCADE,
+    tieu_chi          TEXT,   -- Tên tiêu chí, VD: "Hiểu bản chất, khái niệm"
+    trong_so          TEXT,   -- Trọng số, VD: "40%"
+    muc_xuat_sac      TEXT,   -- Mức Xuất sắc (9.0-10)
+    muc_tot           TEXT,   -- Mức Tốt (7.0-8.9)
+    muc_dat           TEXT,   -- Mức Đạt (5.0-6.9)
+    muc_chua_dat      TEXT,   -- Mức Chưa đạt (0-4.9)
+    thu_tu            INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS chuong_trinh_dao_tao (
@@ -312,6 +362,10 @@ class Database:
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+        
+        # Đăng ký hàm unaccent để hỗ trợ tìm kiếm không dấu
+        self.conn.create_function("unaccent", 1, unaccent_vietnamese)
+        
         # Bật chế độ WAL để hỗ trợ đọc/ghi đồng thời tốt hơn
         try:
             self.conn.execute("PRAGMA journal_mode = WAL")
@@ -350,6 +404,18 @@ class Database:
             self._migration_v2,
             # v3: Thêm bảng lịch sử nhập xuất
             self._migration_v3,
+            # v4: Thêm 3 cột mới trong ke_hoach_kiem_tra + 2 bảng rubric
+            self._migration_v4,
+            # v5: Thêm email, so_dien_thoai vào gv_hoc_phan
+            self._migration_v5,
+            # v6: Thêm level_irm vào bảng clo
+            self._migration_v6,
+            # v7: Thêm quy_dinh_hp và co_so_vat_chat
+            self._migration_v7,
+            # v8: Thêm phu_luc vào hoc_phan
+            self._migration_v8,
+            # v9: Thêm pp_day, pp_hoc, bai_danh_gia vào noi_dung
+            self._migration_v9,
         ]
         
         for i, patch_fn in enumerate(patches):
@@ -404,7 +470,89 @@ class Database:
             )
         """)
 
+    def _migration_v4(self):
+        """Thêm 3 cột mới vào ke_hoach_kiem_tra + 2 bảng Rubric (mẫu DCCTHP mới)."""
+        # 1. Thêm cột tiêu_chi_danh_gia
+        try:
+            self.conn.execute("ALTER TABLE ke_hoach_kiem_tra ADD COLUMN tieu_chi_danh_gia TEXT")
+        except Exception:
+            pass  # Cột đã tồn tại
+        # 2. Thêm cột diem_toi_da_cdr
+        try:
+            self.conn.execute("ALTER TABLE ke_hoach_kiem_tra ADD COLUMN diem_toi_da_cdr TEXT")
+        except Exception:
+            pass
+        # 3. Thêm cột trong_so_cdr
+        try:
+            self.conn.execute("ALTER TABLE ke_hoach_kiem_tra ADD COLUMN trong_so_cdr TEXT")
+        except Exception:
+            pass
+        # 4. Tạo bảng rubric_danh_gia
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS rubric_danh_gia (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                hp_id   INTEGER REFERENCES hoc_phan(id) ON DELETE CASCADE,
+                ten     TEXT,
+                ky_hieu TEXT,
+                mo_ta   TEXT,
+                thu_tu  INTEGER DEFAULT 1
+            )
+        """)
+        # 5. Tạo bảng rubric_tieu_chi
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS rubric_tieu_chi (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                rubric_id     INTEGER REFERENCES rubric_danh_gia(id) ON DELETE CASCADE,
+                tieu_chi      TEXT,
+                trong_so      TEXT,
+                muc_xuat_sac  TEXT,
+                muc_tot       TEXT,
+                muc_dat       TEXT,
+                muc_chua_dat  TEXT,
+                thu_tu        INTEGER DEFAULT 1
+            )
+        """)
 
+    def _migration_v5(self):
+        """Thêm các cột thông tin chi tiết vào hp_giang_vien."""
+        cols = ['ho_ten', 'hoc_ham_vi', 'don_vi', 'email', 'sdt']
+        for col in cols:
+            try:
+                self.conn.execute(f"ALTER TABLE hp_giang_vien ADD COLUMN {col} TEXT")
+            except Exception:
+                pass
+
+    def _migration_v6(self):
+        """Thêm level_irm vào bảng clo."""
+        try:
+            self.conn.execute("ALTER TABLE clo ADD COLUMN level_irm TEXT DEFAULT 'I'")
+        except Exception:
+            pass
+
+    def _migration_v7(self):
+        """Thêm quy_dinh_hp và co_so_vat_chat."""
+        for col in [("quy_dinh_hp", "TEXT"), ("co_so_vat_chat", "TEXT")]:
+            try:
+                self.conn.execute(f"ALTER TABLE hoc_phan ADD COLUMN {col[0]} {col[1]}")
+            except Exception:
+                pass
+
+    def _migration_v8(self):
+        """Thêm phu_luc vào hoc_phan."""
+        try:
+            self.conn.execute("ALTER TABLE hoc_phan ADD COLUMN phu_luc TEXT")
+        except Exception:
+            pass
+
+    def _migration_v9(self):
+        """Thêm pp_day, pp_hoc, bai_danh_gia vào bảng noi_dung."""
+        columns = [c['name'] for c in self.conn.execute("PRAGMA table_info(noi_dung)").fetchall()]
+        if 'pp_day' not in columns:
+            self.conn.execute("ALTER TABLE noi_dung ADD COLUMN pp_day TEXT")
+        if 'pp_hoc' not in columns:
+            self.conn.execute("ALTER TABLE noi_dung ADD COLUMN pp_hoc TEXT")
+        if 'bai_danh_gia' not in columns:
+            self.conn.execute("ALTER TABLE noi_dung ADD COLUMN bai_danh_gia TEXT")
 
     def close(self):
         if self.conn:
@@ -568,7 +716,9 @@ class Database:
             SELECT hp.*, k.ten AS ten_khoa
             FROM hoc_phan hp
             LEFT JOIN khoa k ON hp.khoa_id = k.id
-            WHERE hp.ten_viet LIKE ? OR hp.ma LIKE ? OR hp.ten_anh LIKE ?
+            WHERE unaccent(hp.ten_viet) LIKE unaccent(?) 
+               OR unaccent(hp.ma) LIKE unaccent(?) 
+               OR unaccent(hp.ten_anh) LIKE unaccent(?)
             ORDER BY k.ten, hp.ten_viet
         """, (k, k, k)).fetchall()
 
@@ -598,23 +748,24 @@ class Database:
     # ------------------------------------------------------- HP GIANG VIEN
     def get_gv_of_hp(self, hp_id):
         return self.conn.execute("""
-            SELECT hgv.id, hgv.vai_tro, hgv.thu_tu,
-                   gv.id AS gv_id, gv.ho_ten, gv.hoc_vi, gv.sdt, gv.email
+            SELECT hgv.*, gv.id AS master_gv_id
             FROM hp_giang_vien hgv
-            JOIN giang_vien gv ON hgv.gv_id = gv.id
+            LEFT JOIN giang_vien gv ON hgv.gv_id = gv.id
             WHERE hgv.hp_id=?
-            ORDER BY hgv.vai_tro DESC, hgv.thu_tu
+            ORDER BY hgv.thu_tu, hgv.vai_tro DESC
         """, (hp_id,)).fetchall()
 
     def set_gv_of_hp(self, hp_id, gv_list):
-        """gv_list: list of dict {gv_id, vai_tro, thu_tu}"""
+        """gv_list: list of dict {gv_id, ho_ten, hoc_ham_vi, don_vi, email, sdt, vai_tro, thu_tu}"""
         with self.transaction():
             self.conn.execute("DELETE FROM hp_giang_vien WHERE hp_id=?", (hp_id,))
             for item in gv_list:
-                self.conn.execute(
-                    "INSERT INTO hp_giang_vien(hp_id,gv_id,vai_tro,thu_tu) VALUES(?,?,?,?)",
-                    (hp_id, item['gv_id'], item.get('vai_tro', 'chinh'), item.get('thu_tu', 1))
-                )
+                self.conn.execute("""
+                    INSERT INTO hp_giang_vien(hp_id, gv_id, ho_ten, hoc_ham_vi, don_vi, email, sdt, vai_tro, thu_tu)
+                    VALUES(?,?,?,?,?,?,?,?,?)
+                """, (hp_id, item.get('gv_id'), item.get('ho_ten'), item.get('hoc_ham_vi'),
+                     item.get('don_vi'), item.get('email'), item.get('sdt'),
+                     item.get('vai_tro', 'tham_gia'), item.get('thu_tu', 1)))
         
 
     # ----------------------------------------------------------- MUC TIEU
@@ -645,9 +796,9 @@ class Database:
             self.conn.execute("DELETE FROM clo WHERE hp_id=?", (hp_id,))
             for item in items:
                 self.conn.execute(
-                    "INSERT INTO clo(hp_id,ma,mo_ta,cdr_ma,nhom,la_tieu_de_nhom) VALUES(?,?,?,?,?,?)",
+                    "INSERT INTO clo(hp_id,ma,mo_ta,cdr_ma,level_irm,nhom,la_tieu_de_nhom) VALUES(?,?,?,?,?,?,?)",
                     (hp_id, item.get('ma'), item.get('mo_ta'), item.get('cdr_ma'),
-                     item.get('nhom'), item.get('la_tieu_de_nhom', 0))
+                     item.get('level_irm'), item.get('nhom'), item.get('la_tieu_de_nhom', 0))
                 )
         
 
@@ -758,13 +909,15 @@ class Database:
                 self.conn.execute("""
                     INSERT INTO ke_hoach_kiem_tra
                     (hp_id,nhom,ty_trong_nhom,thu_tu,noi_dung,hinh_thuc,
-                     thoi_gian,thang_diem,cap_do_dap_ung,clo_lien_quan,ty_trong)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                     thoi_gian,thang_diem,cap_do_dap_ung,clo_lien_quan,ty_trong,
+                     tieu_chi_danh_gia,diem_toi_da_cdr,trong_so_cdr)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, (
                     hp_id, item.get('nhom'), item.get('ty_trong_nhom'),
                     item.get('thu_tu'), item.get('noi_dung'), item.get('hinh_thuc'),
                     item.get('thoi_gian'), item.get('thang_diem'),
-                    item.get('cap_do_dap_ung'), item.get('clo_lien_quan'), item.get('ty_trong')
+                    item.get('cap_do_dap_ung'), item.get('clo_lien_quan'), item.get('ty_trong'),
+                    item.get('tieu_chi_danh_gia'), item.get('diem_toi_da_cdr'), item.get('trong_so_cdr')
                 ))
         
 
@@ -787,7 +940,98 @@ class Database:
                     item.get('quyet_dinh'), item.get('nguoi_cap_nhat'),
                     item.get('truong_khoa'), item.get('ngay_cap_nhat')
                 ))
+
+    # ------------------------------------------------------------- RUBRICS
+    def get_rubrics(self, hp_id):
+        return self.conn.execute(
+            "SELECT * FROM rubric_danh_gia WHERE hp_id=? ORDER BY thu_tu", (hp_id,)
+        ).fetchall()
+
+    def get_rubric_tieu_chi(self, rubric_id):
+        return self.conn.execute(
+            "SELECT * FROM rubric_tieu_chi WHERE rubric_id=? ORDER BY thu_tu", (rubric_id,)
+        ).fetchall()
+
+    def get_rubric_full(self, hp_id):
+        """Lấy toàn bộ rubric và tiêu chí của 1 HP."""
+        rubrics = self.get_rubrics(hp_id)
+        res = []
+        for r in rubrics:
+            rd = dict(r)
+            rd['tieu_chi_list'] = [dict(tc) for tc in self.get_rubric_tieu_chi(r['id'])]
+            res.append(rd)
+        return res
+
+    def set_rubrics_full(self, hp_id, rubric_list):
+        """rubric_list: [{'ten','ky_hieu','mo_ta','thu_tu','tieu_chi_list':[...]}]"""
+        with self.transaction():
+            # Xóa cũ (Cascade sẽ xóa tiêu chí)
+            self.conn.execute("DELETE FROM rubric_danh_gia WHERE hp_id=?", (hp_id,))
+            for rb in rubric_list:
+                cur = self.conn.execute("""
+                    INSERT INTO rubric_danh_gia(hp_id, ten, ky_hieu, mo_ta, thu_tu)
+                    VALUES(?,?,?,?,?)
+                """, (hp_id, rb.get('ten'), rb.get('ky_hieu'), rb.get('mo_ta'), rb.get('thu_tu', 1)))
+                rb_id = cur.lastrowid
+                
+                for tc in rb.get('tieu_chi_list', []):
+                    self.conn.execute("""
+                        INSERT INTO rubric_tieu_chi(rubric_id, tieu_chi, trong_so, 
+                                                   muc_xuat_sac, muc_tot, muc_dat, muc_chua_dat, thu_tu)
+                        VALUES(?,?,?,?,?,?,?,?)
+                    """, (rb_id, tc.get('tieu_chi'), tc.get('trong_so'),
+                         tc.get('muc_xuat_sac'), tc.get('muc_tot'), tc.get('muc_dat'), tc.get('muc_chua_dat'),
+                         tc.get('thu_tu', 1)))
         
+
+    # --------------------------------------------------------- RUBRIC DANH GIA
+    def get_rubric_by_hp(self, hp_id):
+        """Lấy danh sách rubric của học phần."""
+        return self.conn.execute(
+            "SELECT * FROM rubric_danh_gia WHERE hp_id=? ORDER BY thu_tu", (hp_id,)
+        ).fetchall()
+
+    def set_rubric(self, hp_id, items):
+        """Lưu danh sách rubric (xóa cũ rồi insert mới).
+        items: list of dict {ten, ky_hieu, mo_ta, thu_tu, tieu_chi_list}
+        tieu_chi_list: list of dict {tieu_chi, trong_so, muc_xuat_sac, muc_tot, muc_dat, muc_chua_dat}
+        """
+        with self.transaction():
+            # Xóa rubric cũ của HP này (cascade xóa tieu_chi)
+            self.conn.execute("DELETE FROM rubric_danh_gia WHERE hp_id=?", (hp_id,))
+            for item in items:
+                cur = self.conn.execute(
+                    "INSERT INTO rubric_danh_gia(hp_id,ten,ky_hieu,mo_ta,thu_tu) VALUES(?,?,?,?,?)",
+                    (hp_id, item.get('ten'), item.get('ky_hieu'),
+                     item.get('mo_ta'), item.get('thu_tu', 1))
+                )
+                rubric_id = cur.lastrowid
+                for tc in item.get('tieu_chi_list', []):
+                    self.conn.execute("""
+                        INSERT INTO rubric_tieu_chi
+                        (rubric_id,tieu_chi,trong_so,muc_xuat_sac,muc_tot,muc_dat,muc_chua_dat,thu_tu)
+                        VALUES(?,?,?,?,?,?,?,?)
+                    """, (
+                        rubric_id, tc.get('tieu_chi'), tc.get('trong_so'),
+                        tc.get('muc_xuat_sac'), tc.get('muc_tot'),
+                        tc.get('muc_dat'), tc.get('muc_chua_dat'), tc.get('thu_tu', 1)
+                    ))
+
+    def get_rubric_tieu_chi(self, rubric_id):
+        """Lấy danh sách tiêu chí của một rubric."""
+        return self.conn.execute(
+            "SELECT * FROM rubric_tieu_chi WHERE rubric_id=? ORDER BY thu_tu", (rubric_id,)
+        ).fetchall()
+
+    def get_rubric_full(self, hp_id):
+        """Lấy toàn bộ rubric (kèm tiêu chí) của học phần để xuất Word."""
+        rubrics = self.get_rubric_by_hp(hp_id)
+        result = []
+        for r in rubrics:
+            rd = dict(r)
+            rd['tieu_chi_list'] = [dict(tc) for tc in self.get_rubric_tieu_chi(r['id'])]
+            result.append(rd)
+        return result
 
     # --------------------------------------------------------- WORD TEMPLATE
     def get_all_templates(self):

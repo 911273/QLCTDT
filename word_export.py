@@ -116,6 +116,9 @@ DEFAULT_PLACEHOLDER_MAP = {
     'ho_ten_ky_trai': 'ho_ten_ky_trai',
     'chuc_danh_ky_phai': 'chuc_danh_ky_phai',
     'ho_ten_ky_phai': 'ho_ten_ky_phai',
+    'quy_dinh_hp': 'quy_dinh_hp',
+    'co_so_vat_chat': 'co_so_vat_chat',
+    'phu_luc': 'phu_luc',
 }
 
 def _build_context(db, hp_id, custom_map=None):
@@ -155,22 +158,30 @@ def _build_context(db, hp_id, custom_map=None):
     gv_chinh =  [g for g in gvs if g['vai_tro'] == 'chinh']
     gv_tham  =  [g for g in gvs if g['vai_tro'] != 'chinh']
     ctx['gv_chinh_list']  = [{'stt': i+1, 'ho_ten': g['ho_ten'],
-                                'hoc_vi': g['hoc_vi'] or '',
+                                'hoc_vi': g.get('hoc_ham_vi') or g.get('hoc_vi') or '',
+                                'don_vi': g.get('don_vi') or '',
                                 'sdt': g['sdt'] or '', 'email': g['email'] or ''}
                                for i, g in enumerate(gv_chinh)]
     ctx['gv_tham_list']   = [{'stt': i+1, 'ho_ten': g['ho_ten'],
-                                'hoc_vi': g['hoc_vi'] or '',
+                                'hoc_vi': g.get('hoc_ham_vi') or g.get('hoc_vi') or '',
+                                'don_vi': g.get('don_vi') or '',
                                 'sdt': g['sdt'] or '', 'email': g['email'] or ''}
                                for i, g in enumerate(gv_tham)]
     ctx['muc_tieu_list']  = [dict(r) for r in mts]
     ctx['clo_list']       = [dict(r) for r in clos]
-    ctx['hl_chinh']       = [r['noi_dung'] for r in hls if r['loai'] == 'chinh']
-    ctx['hl_tham_khao']   = [r['noi_dung'] for r in hls if r['loai'] == 'tham_khao']
-    ctx['hl_khac']        = [r['noi_dung'] for r in hls if r['loai'] == 'khac']
+    # Section 5: Cơ sở vật chất & Học liệu (5.1 - 5.7)
+    ctx['hoc_lieu_all'] = [dict(r) for r in hls]
+    # Keep legacy keys for template compatibility if needed
+    ctx['hl_chinh']     = [r['noi_dung'] for r in hls if r['loai'] in ('chinh', '5.1')]
+    ctx['hl_tham_khao'] = [r['noi_dung'] for r in hls if r['loai'] in ('tham_khao', '5.2')]
+    ctx['hl_khac']      = [r['noi_dung'] for r in hls if r['loai'] in ('khac', '5.3')]
     ctx['noi_dung_lt']    = [dict(r) for r in ndlt]
     ctx['noi_dung_th']    = [dict(r) for r in ndth]
     ctx['ke_hoach_kt']    = [dict(r) for r in kts]
     ctx['lich_su']        = [dict(r) for r in lsu]
+    
+    # Rubric đánh giá (máu DCCTHP mới)
+    ctx['rubric_list']    = db.get_rubric_full(hp_id) if hasattr(db, 'get_rubric_full') else []
     
     # Một số helper fields
     ctx['co_thuc_hanh'] = hp.get('co_thuc_hanh')
@@ -207,27 +218,25 @@ def export_builtin(db, hp_id, out_path):
 
     # Bảng giảng viên
     _add_para(doc, 'Các giảng viên phụ trách học phần:', size=12)
-    gv_table = doc.add_table(rows=1, cols=4)
+    gv_table = doc.add_table(rows=1, cols=6)
     _set_borders(gv_table)
     hdr_cells = gv_table.rows[0].cells
-    for text, cell in zip(['TT', 'Học hàm, học vị, họ và tên', 'Số điện thoại', 'Email'],
-                          hdr_cells):
-        _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    headers = ['TT', 'Vai trò', 'Học hàm, học vị, họ và tên', 'Đơn vị công tác', 'Số điện thoại', 'Email']
+    for text, cell in zip(headers, hdr_cells):
+        _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
         _set_cell_bg(cell, 'D6E4F0')
 
     def _add_gv_group(title, gv_list):
-        row = gv_table.add_row()
-        merged = row.cells[0]
-        merged.merge(row.cells[3])
-        _cell_text(merged, title, bold=True)
-        _set_cell_bg(merged, 'E8F4FD')
+        if not gv_list: return
         for gv in gv_list:
             dr = gv_table.add_row()
-            _cell_text(dr.cells[0], str(gv['stt']), align=WD_ALIGN_PARAGRAPH.CENTER)
+            _cell_text(dr.cells[0], str(gv['stt']), align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+            _cell_text(dr.cells[1], title, size=10)
             hv_ten = f"{gv['hoc_vi']} {gv['ho_ten']}".strip()
-            _cell_text(dr.cells[1], hv_ten)
-            _cell_text(dr.cells[2], gv['sdt'])
-            _cell_text(dr.cells[3], gv['email'])
+            _cell_text(dr.cells[2], hv_ten, size=10)
+            _cell_text(dr.cells[3], gv['don_vi'], size=10)
+            _cell_text(dr.cells[4], gv['sdt'], size=10, align=WD_ALIGN_PARAGRAPH.CENTER)
+            _cell_text(dr.cells[5], gv['email'], size=10, align=WD_ALIGN_PARAGRAPH.CENTER)
 
     _add_gv_group('Giảng viên phụ trách chính', ctx['gv_chinh_list'])
     _add_gv_group('Giảng viên tham gia giảng dạy', ctx['gv_tham_list'])
@@ -300,44 +309,72 @@ def export_builtin(db, hp_id, out_path):
             _cell_text(mc, mt.get('nhom', ''), bold=True, italic=True)
             _set_cell_bg(mc, 'F2F2F2')
         else:
-            _cell_text(r.cells[0], str(mt.get('so_thu_tu', '')), align=WD_ALIGN_PARAGRAPH.CENTER)
+            _cell_text(r.cells[0], f"MT{mt.get('so_thu_tu', '')}", align=WD_ALIGN_PARAGRAPH.CENTER)
             _cell_text(r.cells[1], mt.get('mo_ta', ''), italic=True)
             _cell_text(r.cells[2], mt.get('cdr_ma', ''), bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
 
     # ── 4. CLO ───────────────────────────────────────────────────────────────
     doc.add_paragraph()
     _add_para(doc, '4. Chuẩn đầu ra học phần', bold=True, size=12)
-    clo_table = doc.add_table(rows=1, cols=3)
+    clo_table = doc.add_table(rows=1, cols=4)
     _set_borders(clo_table)
-    for text, cell in zip(['CDR học phần', 'Mô tả\nSau khi kết thúc học phần này, người học có thể:', 'CDR CTĐT'],
-                          clo_table.rows[0].cells):
-        _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+    headers_clo = ['CDR học phần', 'Mô tả\nSau khi kết thúc học phần này, người học có thể:', 'CDR CTĐT', 'Mức độ']
+    for text, cell in zip(headers_clo, clo_table.rows[0].cells):
+        _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
         _set_cell_bg(cell, 'D6E4F0')
+    
+    # Độ rộng cột
+    w_clo = [Cm(2.5), Cm(10.5), Cm(2.0), Cm(1.5)]
+    for ci, w in enumerate(w_clo):
+        for cell in clo_table.columns[ci].cells:
+            cell.width = w
+
     for clo in ctx['clo_list']:
         r = clo_table.add_row()
-        if clo.get('la_tieu_de_nhom'):
-            mc = r.cells[0]
-            mc.merge(r.cells[2])
-            _cell_text(mc, clo.get('nhom', ''), bold=True, italic=True)
-            _set_cell_bg(mc, 'F2F2F2')
-        else:
-            _cell_text(r.cells[0], clo.get('ma', ''), bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
-            _cell_text(r.cells[1], clo.get('mo_ta', ''))
-            _cell_text(r.cells[2], clo.get('cdr_ma', ''), bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _cell_text(r.cells[0], clo.get('ma', ''), bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _cell_text(r.cells[1], clo.get('mo_ta', ''))
+        _cell_text(r.cells[2], clo.get('cdr_ma', ''), bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _cell_text(r.cells[3], clo.get('level_irm', 'I'), align=WD_ALIGN_PARAGRAPH.CENTER)
 
-    # ── 5. Học liệu ──────────────────────────────────────────────────────────
+    # ── 5. Cơ sở vật chất, trang thiết bị phục vụ dạy học ───────────────────
     doc.add_paragraph()
-    _add_para(doc, '5. Học liệu', bold=True, size=12)
-    _add_para(doc, '5.1. Tài liệu học tập (Sách, giáo trình chính)', bold=True, size=12)
-    for i, text in enumerate(ctx['hl_chinh']):
-        _add_para(doc, f'[{i+1}] {text}', size=12)
-    _add_para(doc, '5.2. Tài liệu tham khảo', bold=True, size=12)
-    for i, text in enumerate(ctx['hl_tham_khao']):
-        _add_para(doc, f'[{i+1}] {text}', size=12)
-    if ctx['hl_khac']:
-        _add_para(doc, '5.3. Các tài liệu khác', bold=True, size=12)
-        for text in ctx['hl_khac']:
-            _add_para(doc, text, size=12)
+    _add_para(doc, '5. Cơ sở vật chất, trang thiết bị phục vụ dạy học', bold=True, size=12)
+    
+    sec5_titles = {
+        '5.1': '5.1. Tài liệu học tập (Sách, giáo trình chính)',
+        'chinh': '5.1. Tài liệu học tập (Sách, giáo trình chính)',
+        '5.2': '5.2. Tài liệu tham khảo',
+        'tham_khao': '5.2. Tài liệu tham khảo',
+        '5.3': '5.3. Các tài liệu khác',
+        'khac': '5.3. Các tài liệu khác',
+        '5.4': '5.4. Phòng học',
+        '5.5': '5.5. Trang thiết bị hỗ trợ giảng dạy',
+        '5.6': '5.6. Thiết bị thực hành, thí nghiệm',
+        '5.7': '5.7. Các hoạt động ngoại khóa (nếu có)'
+    }
+    
+    # Để tránh lặp lại nếu có cả key cũ và mới, ta dùng set để track
+    seen_keys = set()
+    for key in ['5.1', 'chinh', '5.2', 'tham_khao', '5.3', 'khac', '5.4', '5.5', '5.6', '5.7']:
+        if key in seen_keys: continue
+        items = [i for i in ctx.get('hoc_lieu_all', []) if i.get('loai') == key]
+        if items:
+            title = sec5_titles.get(key)
+            _add_para(doc, title, bold=True, size=12)
+            for i, it in enumerate(items):
+                # Nếu có trường TacGia, Ten, ThongTin (như trong Sec5HocLieu mới)
+                parts = []
+                ten = it.get('ten') or it.get('noi_dung') or ''
+                if ten: parts.append(ten)
+                if it.get('tac_gia'): parts.append(f"({it['tac_gia']})")
+                if it.get('thong_tin'): parts.append(f"- {it['thong_tin']}")
+                line = " ".join(parts).strip()
+                _add_para(doc, f'[{i+1}] {line}', size=12)
+            # Đánh dấu đã xử lý cặp key (ví dụ 'chinh' và '5.1' là một)
+            if key == '5.1' or key == 'chinh': seen_keys.update(['5.1', 'chinh'])
+            elif key == '5.2' or key == 'tham_khao': seen_keys.update(['5.2', 'tham_khao'])
+            elif key == '5.3' or key == 'khac': seen_keys.update(['5.3', 'khac'])
+            else: seen_keys.add(key)
 
     # ── 6. Nội dung chi tiết ─────────────────────────────────────────────────
     doc.add_paragraph()
@@ -368,15 +405,43 @@ def export_builtin(db, hp_id, out_path):
     _add_para(doc, f"Bài tập: {ctx['nhiem_vu_bai_tap']}", size=12)
     _add_para(doc, '8.2. Kế hoạch kiểm tra', bold=True, size=12)
     _write_kt_table(doc, ctx['ke_hoach_kt'])
+    # 8.3 Rubric đánh giá (mới theo mẫu DCCTHP)
+    if ctx.get('rubric_list'):
+        doc.add_paragraph()
+        _add_para(doc, '8.3. Rubric đánh giá', bold=True, size=12)
+        for rb in ctx['rubric_list']:
+            ky_hieu = rb.get('ky_hieu', '')
+            ten     = rb.get('ten', '')
+            _add_para(doc, f"{ky_hieu} – {ten}".strip(' –'), bold=True, size=11)
+            if rb.get('tieu_chi_list'):
+                _write_rubric_table(doc, rb['tieu_chi_list'])
 
-    # ── 9. Tiến trình cập nhật ───────────────────────────────────────────────
+    # ── 9. Quy định ──────────────────────────────────────────────────────────
     doc.add_paragraph()
-    _add_para(doc, '9. Tiến trình cập nhật đề cương chi tiết học phần', bold=True, size=12)
+    _add_para(doc, '9. Quy định của học phần', bold=True, size=12)
+    _add_para(doc, ctx.get('quy_dinh_hp', ''), size=12)
+
+    # ── 10. Thông tin về đội ngũ giảng viên (Mục 11 cũ) ──────────────────────
+    doc.add_paragraph()
+    _add_para(doc, '10. Thông tin về đội ngũ giảng viên', bold=True, size=12)
+    _add_para(doc, 'Thông tin giảng viên tham gia giảng dạy và phụ trách chính đã được liệt kê chi tiết tại Mục 1.3.', size=12)
+
+    # ── 11. (Trống - có thể dùng cho mục khác) ──────────────────────────────
+    # ... (giữ nguyên structure 13 mục nếu cần)
+
+    # ── 12. Phụ lục ──────────────────────────────────────────────────────────
+    doc.add_paragraph()
+    _add_para(doc, '12. Phụ lục', bold=True, size=12)
+    _add_para(doc, ctx.get('phu_luc', ''), size=12)
+
+    # ── 13. Tiến trình cập nhật ──────────────────────────────────────────────
+    doc.add_paragraph()
+    _add_para(doc, '13. Tiến trình cập nhật đề cương chi tiết học phần', bold=True, size=12)
     if ctx['lich_su']:
         ls_table = doc.add_table(rows=1, cols=4)
         _set_borders(ls_table)
         for text, cell in zip(['Lần', 'Nội dung cập nhật', 'Người cập nhật', 'Trưởng khoa'],
-                              ls_table.rows[0].cells):
+                               ls_table.rows[0].cells):
             _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER)
             _set_cell_bg(cell, 'D6E4F0')
         for ls in ctx['lich_su']:
@@ -425,104 +490,148 @@ def _add_sig_block(doc, ctx):
 
 
 def _write_lt_table(doc, rows):
-    """Bảng lý thuyết."""
-    t = doc.add_table(rows=1, cols=8)
+    """Bảng lý thuyết — 7 cột theo mẫu mới."""
+    t = doc.add_table(rows=1, cols=7)
     _set_borders(t)
-    for text, cell in zip(['Các nội dung cơ bản', 'LT', 'BT', 'TL', 'TH/TN',
-                           'Tự học', 'Yêu cầu SV chuẩn bị', 'CDR HP'],
-                          t.rows[0].cells):
+    headers = ['TT', 'Mục/Nội dung', 'Giờ (L/B/T/T)', 'HĐ dạy & PP', 'HĐ học', 'CĐR HP', 'Bài ĐG']
+    for text, cell in zip(headers, t.rows[0].cells):
         _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
         _set_cell_bg(cell, 'D6E4F0')
+    
     # Set column widths
-    widths = [Cm(5), Cm(1), Cm(1), Cm(1), Cm(1.2), Cm(1.2), Cm(4.5), Cm(1.5)]
+    widths = [Cm(0.8), Cm(5.5), Cm(2.2), Cm(3.5), Cm(3.5), Cm(1.5), Cm(1.5)]
     for i, w in enumerate(widths):
         for cell in t.columns[i].cells:
             cell.width = w
 
-    for r in rows:
+    for idx, r in enumerate(rows):
         cap = r.get('cap_do', 1)
         is_bold = bool(r.get('in_dam'))
         is_test = r.get('loai') == 'bai_kiem_tra'
         
         indent = '  ' * max(0, cap - 1)
         tr = t.add_row()
-        _cell_text(tr.cells[0], indent + (r.get('ten') or ''), bold=is_bold or is_test, 
+        
+        # TT
+        _cell_text(tr.cells[0], str(idx+1) if not is_test else '', align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+        # Nội dung
+        _cell_text(tr.cells[1], indent + (r.get('ten') or ''), bold=is_bold or is_test, 
                    italic=is_test, size=10)
-        
-        for i, key in enumerate(['gio_lt','gio_bt','gio_tl','gio_th_tn','gio_tu_hoc'], 1):
-            v = r.get(key)
-            _cell_text(tr.cells[i], str(v) if v else '', align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
-        
-        _cell_text(tr.cells[6], r.get('yeu_cau') or '', size=10, italic=is_test)
-        _cell_text(tr.cells[7], r.get('cdr_ma') or '', align=WD_ALIGN_PARAGRAPH.CENTER,
-                   bold=is_bold or is_test, size=10)
+        # Giờ
+        gio_str = f"({r.get('gio_lt') or 0:g}/{r.get('gio_bt') or 0:g}/{r.get('gio_tl') or 0:g}/{r.get('gio_th_tn') or 0:g})"
+        _cell_text(tr.cells[2], gio_str, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+        # HĐ dạy
+        _cell_text(tr.cells[3], r.get('pp_day') or '', size=10)
+        # HĐ học
+        _cell_text(tr.cells[4], r.get('pp_hoc') or '', size=10)
+        # CĐR
+        _cell_text(tr.cells[5], r.get('cdr_ma') or '', align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+        # Bài ĐG
+        _cell_text(tr.cells[6], r.get('bai_danh_gia') or '', align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
         
         if is_test:
-            _set_cell_bg(tr.cells[0], 'F2F2F2')
+            _set_cell_bg(tr.cells[1], 'F2F2F2')
         elif is_bold:
-            _set_cell_bg(tr.cells[0], 'EBF5FB')
+            _set_cell_bg(tr.cells[1], 'EBF5FB')
 
 
 def _write_th_table(doc, rows):
-    """Bảng thực hành."""
-    t = doc.add_table(rows=1, cols=8)
+    """Bảng thực hành — 7 cột chuẩn."""
+    t = doc.add_table(rows=1, cols=7)
     _set_borders(t)
-    for text, cell in zip(['Nội dung theo bài', 'TH', 'BT', 'TL', 'KT',
-                           'Tự học', 'Yêu cầu SV chuẩn bị', 'CDR HP'],
-                          t.rows[0].cells):
+    headers = ['TT', 'Nội dung thực hành', 'Giờ (T/B/T/K)', 'HĐ dạy & PP', 'HĐ học', 'CĐR HP', 'Bài ĐG']
+    for text, cell in zip(headers, t.rows[0].cells):
         _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
         _set_cell_bg(cell, 'D6E4F0')
-    for r in rows:
+    for idx, r in enumerate(rows):
         cap = r.get('cap_do', 1)
         is_bold = bool(r.get('in_dam'))
         indent = '  ' * max(0, cap - 1)
         tr = t.add_row()
-        _cell_text(tr.cells[0], indent + (r.get('ten') or ''), bold=is_bold, size=10)
-        for i, key in enumerate(['gio_th','gio_bt','gio_tl','gio_kt','gio_tu_hoc'], 1):
-            v = r.get(key)
-            _cell_text(tr.cells[i], str(v) if v else '', align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
-        _cell_text(tr.cells[6], r.get('yeu_cau') or '', size=10)
-        _cell_text(tr.cells[7], r.get('cdr_ma') or '', align=WD_ALIGN_PARAGRAPH.CENTER,
-                   bold=is_bold, size=10)
+        
+        _cell_text(tr.cells[0], str(idx+1), align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+        _cell_text(tr.cells[1], indent + (r.get('ten') or ''), bold=is_bold, size=10)
+        gio_str = f"({r.get('gio_th') or 0:g}/{r.get('gio_bt') or 0:g}/{r.get('gio_tl') or 0:g}/{r.get('gio_kt') or 0:g})"
+        _cell_text(tr.cells[2], gio_str, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+        _cell_text(tr.cells[3], r.get('pp_day') or '', size=10)
+        _cell_text(tr.cells[4], r.get('pp_hoc') or '', size=10)
+        _cell_text(tr.cells[5], r.get('cdr_ma') or '', align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+        _cell_text(tr.cells[6], r.get('bai_danh_gia') or '', align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
 
 
 def _write_kt_table(doc, rows):
-    """Bảng kế hoạch kiểm tra."""
-    t = doc.add_table(rows=1, cols=7)
+    """Bảng kế hoạch kiểm tra — 8 cột theo mẫu DCCTHP mới."""
+    t = doc.add_table(rows=1, cols=8)
     _set_borders(t)
-    for text, cell in zip(['Thời điểm/Nhóm', 'Nội dung', 'Hình thức', 'Thời gian',
-                           'Thang điểm', 'Mức độ đáp ứng CDR HP', 'Tỷ trọng'],
-                          t.rows[0].cells):
+    headers = ['Thành phần đánh giá', 'Trọng số (%)',
+               'Bài đánh giá', 'Hình thức đánh giá',
+               'Tiêu chí đánh giá', 'CĐR được đánh giá',
+               'Điểm tối đa của CĐR', 'Trọng số đánh giá theo CĐR (%)']
+    for text, cell in zip(headers, t.rows[0].cells):
         _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
         _set_cell_bg(cell, 'D6E4F0')
+    # Đầu đề cột
+    col_widths = [Cm(2.8), Cm(1.6), Cm(3.0), Cm(2.0), Cm(2.4), Cm(1.8), Cm(2.0), Cm(2.2)]
+    for i, w in enumerate(col_widths):
+        for cell in t.columns[i].cells:
+            cell.width = w
+
+    nhom_labels = {'thuong_xuyen': 'Đánh giá thường xuyên',
+                   'cuoi_ky':      'Đánh giá học phần'}
     cur_nhom = None
     for r in rows:
         nhom = r.get('nhom', '')
         if nhom != cur_nhom:
             cur_nhom = nhom
-            nhom_label = ('Kiểm tra – đánh giá thường xuyên' if nhom == 'thuong_xuyen'
-                          else 'Thi cuối kỳ')
-            ty_trong_nhom = str(r.get('ty_trong_nhom', ''))
             gr = t.add_row()
             mc = gr.cells[0]
-            mc.merge(gr.cells[5])
-            _cell_text(mc, nhom_label, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+            mc.merge(gr.cells[7])
+            _cell_text(mc, nhom_labels.get(nhom, nhom), bold=True,
+                       align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
             _set_cell_bg(mc, 'EBF5FB')
-            _cell_text(gr.cells[6], f"{ty_trong_nhom}%",
-                       bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
         tr = t.add_row()
-        _cell_text(tr.cells[0], r.get('noi_dung', ''), size=10)
-        _cell_text(tr.cells[1], r.get('noi_dung', ''), size=10)
-        _cell_text(tr.cells[2], r.get('hinh_thuc', ''), size=10,
+        ty_trong_nhom = str(r.get('ty_trong_nhom', '') or '')
+        _cell_text(tr.cells[0], nhom_labels.get(nhom, nhom), size=10)
+        _cell_text(tr.cells[1], f"{ty_trong_nhom}", size=10, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _cell_text(tr.cells[2], r.get('noi_dung', '') or '', size=10)
+        _cell_text(tr.cells[3], r.get('hinh_thuc', '') or '', size=10, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _cell_text(tr.cells[4], r.get('tieu_chi_danh_gia', '') or '', size=10)
+        _cell_text(tr.cells[5], r.get('clo_lien_quan', '') or '', size=10, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _cell_text(tr.cells[6], r.get('diem_toi_da_cdr', '') or '', size=10, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _cell_text(tr.cells[7], r.get('trong_so_cdr', '') or '', size=10, align=WD_ALIGN_PARAGRAPH.CENTER)
+    # Ghi chú cuối bảng
+    note_row = t.add_row()
+    mc = note_row.cells[0]
+    mc.merge(note_row.cells[7])
+    _cell_text(mc, 'Ghi chú: Giảng viên phụ trách lớp học phần chịu trách nhiệm nhập 2 đầu điểm vào Hệ thống quản lý đào tạo của Trường.',
+               italic=True, size=9)
+
+
+def _write_rubric_table(doc, tieu_chi_list):
+    """Xuất bảng Rubric đánh giá (Tiêu chí | Trọng số | XS | Tốt | Đạt | Chưa đạt)."""
+    if not tieu_chi_list:
+        return
+    t = doc.add_table(rows=1, cols=6)
+    _set_borders(t)
+    tc_headers = ['Tiêu chí', 'Trọng số',
+                  'Xuất sắc\n(9.0–10)', 'Tốt\n(7.0–8.9)',
+                  'Đạt\n(5.0–6.9)', 'Chưa đạt\n(0–4.9)']
+    for text, cell in zip(tc_headers, t.rows[0].cells):
+        _cell_text(cell, text, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER, size=10)
+        _set_cell_bg(cell, 'D6E4F0')
+    col_widths_r = [Cm(3.5), Cm(1.6), Cm(3.0), Cm(3.0), Cm(3.0), Cm(3.0)]
+    for ci, w in enumerate(col_widths_r):
+        for cell in t.columns[ci].cells:
+            cell.width = w
+    for tc in tieu_chi_list:
+        row = t.add_row()
+        _cell_text(row.cells[0], tc.get('tieu_chi', '') or '', size=10)
+        _cell_text(row.cells[1], tc.get('trong_so', '') or '', size=10,
                    align=WD_ALIGN_PARAGRAPH.CENTER)
-        _cell_text(tr.cells[3], r.get('thoi_gian', ''), size=10,
-                   align=WD_ALIGN_PARAGRAPH.CENTER)
-        _cell_text(tr.cells[4], str(r.get('thang_diem', '') or ''), size=10,
-                   align=WD_ALIGN_PARAGRAPH.CENTER)
-        _cell_text(tr.cells[5], r.get('cap_do_dap_ung', ''), size=10,
-                   align=WD_ALIGN_PARAGRAPH.CENTER)
-        _cell_text(tr.cells[6], str(r.get('ty_trong', '') or ''), size=10,
-                   align=WD_ALIGN_PARAGRAPH.CENTER)
+        _cell_text(row.cells[2], tc.get('muc_xuat_sac', '') or '', size=10)
+        _cell_text(row.cells[3], tc.get('muc_tot', '') or '', size=10)
+        _cell_text(row.cells[4], tc.get('muc_dat', '') or '', size=10)
+        _cell_text(row.cells[5], tc.get('muc_chua_dat', '') or '', size=10)
 
 
 # ─── Template-based export with Placeholder [TAG] ─────────────────────────────

@@ -1,4 +1,4 @@
-# sections/sec9_cap_nhat.py — Tiến trình cập nhật đề cương chi tiết học phần
+# sections/sec13_cap_nhat.py — Tiến trình cập nhật đề cương chi tiết học phần
 import tkinter as tk
 import ttkbootstrap as tb
 from sections.base_section import (BaseSection, RowEditDialog, make_tree,
@@ -7,7 +7,7 @@ from utils.ui_utils import (show_modern_info, show_modern_warning,
                              show_modern_error, ask_modern_yesno)
 
 
-class Sec9CapNhat(BaseSection):
+class Sec13CapNhat(BaseSection):
     def __init__(self, parent, db, **kwargs):
         super().__init__(parent, db, **kwargs)
         self._rows = []
@@ -47,7 +47,7 @@ class Sec9CapNhat(BaseSection):
     def _build_ui(self):
         head = tb.Frame(self, padding=(16, 12, 16, 4))
         head.pack(fill='x')
-        tb.Label(head, text='9. Thông tin về các lần cập nhật, chỉnh sửa nội dung đề cương',
+        tb.Label(head, text='13. Thông tin về các lần cập nhật, chỉnh sửa nội dung đề cương',
                   style='SectionHeader.TLabel').pack(anchor='w')
         tb.Separator(self, orient='horizontal').pack(fill='x', padx=16, pady=4)
 
@@ -200,7 +200,7 @@ class Sec9CapNhat(BaseSection):
 
     def save(self):
         if self.hp_id is not None:
-            self.controller.save_current_hp(self.hp_id, None, {'sec9': self.get_data_dict()})
+            self.controller.save_current_hp(self.hp_id, None, {'sec13': self.get_data_dict()})
 
     def get_data_dict(self):
         self.ensure_ui()

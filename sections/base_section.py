@@ -375,12 +375,13 @@ def recolor_tree(tree):
 # ─── Dialog chỉnh sửa hàng bảng ──────────────────────────────────────────────
 class RowEditDialog(tb.Toplevel):
     """Dialog nhập/sửa một hàng dữ liệu dạng label:entry."""
-    def __init__(self, parent, title, fields, initial=None):
+    def __init__(self, parent, title, fields, initial=None, on_build=None):
         """
         fields: list of (field_key, label_text, widget_type, opts)
             widget_type: 'entry' | 'text' | 'combo' | 'spin' | 'multi_picker'
             opts: dict (cho combo: values=[...], cho multi_picker: values=[...])
         initial: dict {field_key: value}
+        on_build: callback(dlg) to add extra logic/widgets before wait_window
         """
         super().__init__(parent)
         set_window_icon(self)
@@ -389,9 +390,12 @@ class RowEditDialog(tb.Toplevel):
         self.result = None
         self._vars = {}
         self._texts = {}
+        self.entries = {}
 
         self.grab_set()
         self._build(fields, initial or {})
+        if on_build:
+            on_build(self)
         self.transient(parent)
         self.wait_window()
 
@@ -413,6 +417,7 @@ class RowEditDialog(tb.Toplevel):
                 if initial.get(key):
                     txt.insert('1.0', initial[key])
                 self._texts[key] = txt
+                self.entries[key] = txt
             elif wtype == 'combo':
                 var = tk.StringVar(value=str(initial.get(key, '')))
                 cb = tb.Combobox(frm, textvariable=var,
@@ -421,6 +426,7 @@ class RowEditDialog(tb.Toplevel):
                                   state=opts.get('state', 'readonly'))
                 cb.grid(row=r, column=1, sticky='ew', **pad)
                 self._vars[key] = var
+                self.entries[key] = cb
             elif wtype == 'spin':
                 var = tk.StringVar(value=str(initial.get(key, opts.get('from_', 0))))
                 sp = tb.Spinbox(frm, textvariable=var,
@@ -430,6 +436,7 @@ class RowEditDialog(tb.Toplevel):
                                  width=10, font=('Arial', 10))
                 sp.grid(row=r, column=1, sticky='w', **pad)
                 self._vars[key] = var
+                self.entries[key] = sp
             elif wtype == 'multi_picker':
                 var = tk.StringVar(value=str(initial.get(key, '')))
                 f = tb.Frame(frm)
@@ -444,20 +451,22 @@ class RowEditDialog(tb.Toplevel):
                 
                 tb.Button(f, text='...', width=3, command=_open_picker).pack(side='right', padx=(4,0))
                 self._vars[key] = var
+                self.entries[key] = e
             else:  # entry
                 var = tk.StringVar(value=str(initial.get(key, '')))
                 e = tb.Entry(frm, textvariable=var, width=44,
-                              font=('Arial', 10))
+                               font=('Arial', 10))
                 e.grid(row=r, column=1, sticky='ew', **pad)
                 self._vars[key] = var
+                self.entries[key] = e
 
         frm.columnconfigure(1, weight=1)
 
         # Buttons
-        bf = tb.Frame(self, padding=(12, 4, 12, 12))
-        bf.pack(fill='x')
-        tb.Button(bf, text='✔ Lưu', command=self._ok).pack(side='right', padx=4)
-        tb.Button(bf, text='✘ Hủy', command=self.destroy).pack(side='right', padx=4)
+        self.btn_frame = tb.Frame(self, padding=(12, 4, 12, 12))
+        self.btn_frame.pack(fill='x')
+        tb.Button(self.btn_frame, text='✔ Lưu', command=self._ok).pack(side='right', padx=4)
+        tb.Button(self.btn_frame, text='✘ Hủy', command=self.destroy).pack(side='right', padx=4)
 
     def _ok(self):
         self.result = {}

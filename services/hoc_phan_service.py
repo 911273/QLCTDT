@@ -63,6 +63,9 @@ class HocPhanService:
                 if task_data:
                     self.repo.update(hp_id, task_data)
                 self.repo.set_ke_hoach_kt(hp_id, sec_data.get('rows', []))
+                # Lưu Rubric đánh giá (mẫu DCCTHP mới)
+                if 'rubric_list' in sec_data and hasattr(self.db, 'set_rubric'):
+                    self.db.set_rubric(hp_id, sec_data.get('rubric_list', []))
             
             elif sec_key == 'sec9':
                 sig_fields = ['dia_diem_ky', 'ngay_ky', 'chuc_danh_ky_trai', 'ho_ten_ky_trai', 'chuc_danh_ky_phai', 'ho_ten_ky_phai']

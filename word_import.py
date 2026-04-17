@@ -320,19 +320,9 @@ def _parse_table_clo(table):
         if len(cells) < 2:
             continue
 
-        # Group header
+        # Group header - Skip but keep track if needed for context (optional)
         if _is_group_header(' '.join(cells)):
-            for c in cells:
-                if _is_group_header(c):
-                    current_nhom = _clean(c)
-                    items.append({
-                        'ma': '',
-                        'mo_ta': current_nhom,
-                        'cdr_ma': '',
-                        'nhom': current_nhom,
-                        'la_tieu_de_nhom': 1
-                    })
-                    break
+            # We no longer add group headers to the items list
             continue
 
         # Data row
@@ -418,10 +408,49 @@ def _parse_table_noi_dung(table):
 
         # Parse hours - try to extract from appropriate columns
         gio_lt = gio_bt = gio_tl = gio_th_tn = None
+        gio_th = gio_kt = None
         yeu_cau = ''
         cdr_ma = ''
+        pp_day = pp_hoc = bai_danh_gia = ''
 
+        # NEW LOGIC: detect 7-column layout (TT, Ten, Gio, HDD, HDH, CDR, BDG)
+        is_new_layout = False
         if num_cols >= 7:
+            check_header = ' '.join(cells).lower()
+            if 'hoạt động dạy' in check_header or 'pp dạy' in check_header:
+                is_new_layout = True
+
+        if is_new_layout:
+            # Shift indices because of TT column if present
+            # We assume cells[0] is TT, cells[1] is Ten, cells[2] is Gio...
+            # But wait, num_cols might be 7 or 8.
+            # Usually: TT | Ten | Gio | HDD | HDH | CDR | BDG
+            idx_ten = 1
+            idx_gio = 2
+            idx_hdd = 3
+            idx_hdh = 4
+            idx_cdr = 5
+            idx_bdg = 6
+            
+            ten = _clean(cells[idx_ten]) if len(cells) > idx_ten else ten
+            gio_str = _clean(cells[idx_gio]) if len(cells) > idx_gio else ''
+            # Extract (1/2/4/0)
+            matches = re.findall(r'(\d*\.?\d+)', gio_str)
+            if matches:
+                if len(matches) >= 4:
+                    gio_lt = _extract_number(matches[0]) 
+                    gio_bt = _extract_number(matches[1])
+                    gio_tl = _extract_number(matches[2])
+                    gio_th_tn = _extract_number(matches[3])
+                elif len(matches) == 1:
+                    gio_lt = _extract_number(matches[0])
+
+            pp_day = _clean(cells[idx_hdd]) if len(cells) > idx_hdd else ''
+            pp_hoc = _clean(cells[idx_hdh]) if len(cells) > idx_hdh else ''
+            cdr_ma = _clean(cells[idx_cdr]) if len(cells) > idx_cdr else ''
+            bai_danh_gia = _clean(cells[idx_bdg]) if len(cells) > idx_bdg else ''
+        
+        elif num_cols >= 7:
             gio_lt = _extract_number(cells[1]) if len(cells) > 1 else None
             gio_bt = _extract_number(cells[2]) if len(cells) > 2 else None
             gio_tl = _extract_number(cells[3]) if len(cells) > 3 else None
@@ -444,8 +473,11 @@ def _parse_table_noi_dung(table):
             'gio_bt': gio_bt,
             'gio_tl': gio_tl,
             'gio_th_tn': gio_th_tn,
+            'pp_day': pp_day,
+            'pp_hoc': pp_hoc,
             'yeu_cau': yeu_cau,
-            'cdr_ma': cdr_ma
+            'cdr_ma': cdr_ma,
+            'bai_danh_gia': bai_danh_gia
         })
 
     return items
@@ -571,7 +603,10 @@ def _parse_paragraphs(paragraphs):
         'nhiem_vu_sv_len_lop': '',
         'nhiem_vu_sv_bai_tap': '',
         'nhiem_vu_sv_dung_cu': '',
-        'nhiem_vu_sv_khac': ''
+        'nhiem_vu_sv_khac': '',
+        'quy_dinh_hp': '',
+        'co_so_vat_chat': '',
+        'phu_luc': ''
     }
 
     current_section = ''
@@ -629,16 +664,32 @@ def _parse_paragraphs(paragraphs):
             current_section = 'hoc_lieu'
             continue
         elif re.match(r'^5\.1', text_lower):
-            hoc_lieu_loai = 'Giáo trình'
+            hoc_lieu_loai = '5.1'
             current_sub_section = '5.1'
             continue
         elif re.match(r'^5\.2', text_lower):
-            hoc_lieu_loai = 'Tài liệu tham khảo'
+            hoc_lieu_loai = '5.2'
             current_sub_section = '5.2'
             continue
         elif re.match(r'^5\.3', text_lower):
-            hoc_lieu_loai = 'Khác'
+            hoc_lieu_loai = '5.3'
             current_sub_section = '5.3'
+            continue
+        elif re.match(r'^5\.4', text_lower):
+            hoc_lieu_loai = '5.4'
+            current_sub_section = '5.4'
+            continue
+        elif re.match(r'^5\.5', text_lower):
+            hoc_lieu_loai = '5.5'
+            current_sub_section = '5.5'
+            continue
+        elif re.match(r'^5\.6', text_lower):
+            hoc_lieu_loai = '5.6'
+            current_sub_section = '5.6'
+            continue
+        elif re.match(r'^5\.7', text_lower):
+            hoc_lieu_loai = '5.7'
+            current_sub_section = '5.7'
             continue
         elif re.match(r'^6\.\s*nội dung', text_lower):
             current_section = 'noi_dung'
@@ -658,14 +709,32 @@ def _parse_paragraphs(paragraphs):
         elif re.match(r'^8\.2', text_lower):
             current_sub_section = '8.2'
             continue
-        elif re.match(r'^9\.\s*tiến trình', text_lower):
+        elif re.match(r'^9\.\s*quy định', text_lower):
+            if current_section == 'kiem_tra':
+                buffer = [] # Reset buffer for new section
+            current_section = 'quy_dinh'
+            continue
+        elif re.match(r'^10\.\s*cơ sở vật chất', text_lower):
+            if current_section == 'quy_dinh':
+                result['quy_dinh_hp'] = '\n'.join(buffer)
+                buffer = []
+            current_section = 'co_so_vat_chat'
+            continue
+        elif re.match(r'^12\.\s*phụ lục', text_lower):
+            if current_section == 'co_so_vat_chat':
+                result['co_so_vat_chat'] = '\n'.join(buffer)
+                buffer = []
+            current_section = 'phu_luc'
+            continue
+        elif re.match(r'^13\.\s*tiến trình', text_lower):
+            if current_section == 'phu_luc':
+                result['phu_luc'] = '\n'.join(buffer)
+                buffer = []
             current_section = 'lich_su'
             continue
 
         # Collect content by section
-        if current_section == 'mo_ta':
-            buffer.append(text)
-        elif current_section == 'hoc_lieu' and current_sub_section in ('5.1', '5.2', '5.3'):
+        if current_section == 'hoc_lieu' and current_sub_section in ('5.1', '5.2', '5.3'):
             if text and not text_lower.startswith('máy vi tính') and text_lower not in ('không có', 'không'):
                 result['hoc_lieu'].append({
                     'loai': hoc_lieu_loai,
@@ -678,7 +747,7 @@ def _parse_paragraphs(paragraphs):
                     'noi_dung': text,
                     'so_thu_tu': len([h for h in result['hoc_lieu'] if h['loai'] == 'Khác']) + 1
                 })
-        elif current_section == 'pp_day_hoc':
+        elif current_section in ('mo_ta', 'pp_day_hoc', 'quy_dinh', 'co_so_vat_chat', 'phu_luc'):
             buffer.append(text)
         elif current_section == 'kiem_tra' and current_sub_section == '8.1':
             t = text_lower
@@ -698,6 +767,12 @@ def _parse_paragraphs(paragraphs):
         result['mo_ta'] = '\n'.join(buffer)
     elif current_section == 'pp_day_hoc' and buffer:
         result['pp_day_hoc'] = '\n'.join(buffer)
+    elif current_section == 'quy_dinh' and buffer:
+        result['quy_dinh_hp'] = '\n'.join(buffer)
+    elif current_section == 'co_so_vat_chat' and buffer:
+        result['co_so_vat_chat'] = '\n'.join(buffer)
+    elif current_section == 'phu_luc' and buffer:
+        result['phu_luc'] = '\n'.join(buffer)
 
     return result
 
@@ -830,6 +905,9 @@ def parse_docx(file_path):
         'nhiem_vu_sv_bai_tap': para_data['nhiem_vu_sv_bai_tap'],
         'nhiem_vu_sv_dung_cu': para_data['nhiem_vu_sv_dung_cu'],
         'nhiem_vu_sv_khac': para_data['nhiem_vu_sv_khac'],
+        'quy_dinh_hp': para_data['quy_dinh_hp'],
+        'co_so_vat_chat': para_data['co_so_vat_chat'],
+        'phu_luc': para_data['phu_luc'],
         'gv_chinh': gv_chinh,
         'gv_tham_gia': gv_tham_gia,
         'thong_tin': thong_tin,
@@ -926,6 +1004,9 @@ def import_single(db, parsed_data, khoa_id=None):
             'nhiem_vu_sv_bai_tap': parsed_data['nhiem_vu_sv_bai_tap'],
             'nhiem_vu_sv_dung_cu': parsed_data['nhiem_vu_sv_dung_cu'],
             'nhiem_vu_sv_khac': parsed_data['nhiem_vu_sv_khac'],
+            'quy_dinh_hp': parsed_data.get('quy_dinh_hp', ''),
+            'co_so_vat_chat': parsed_data.get('co_so_vat_chat', ''),
+            'phu_luc': parsed_data.get('phu_luc', ''),
         }
         hp_id = db.add_hoc_phan(hp_data)
 

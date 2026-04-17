@@ -44,7 +44,7 @@ class Sec3MucTieu(BaseSection):
     def _build_ui(self):
         head = tb.Frame(self, padding=(16, 12, 16, 4))
         head.pack(fill='x')
-        tb.Label(head, text='3. Mục tiêu của học phần (PO)',
+        tb.Label(head, text='3. Mục tiêu của học phần (MT)',
                   style='SectionHeader.TLabel').pack(anchor='w')
         tb.Label(head,
                   text='Học phần này trang bị cho sinh viên / cung cấp cho sinh viên:',
@@ -72,7 +72,7 @@ class Sec3MucTieu(BaseSection):
         bf = tb.Frame(self, padding=(16, 4, 16, 8))
         bf.pack(fill='x')
         tb.Button(bf, text='➕ Thêm MT', command=self._add).pack(side='left', padx=4)
-        tb.Button(bf, text='📂 Thêm Nhóm', command=self._add_group).pack(side='left', padx=4)
+        # tb.Button(bf, text='📂 Thêm Nhóm', command=self._add_group).pack(side='left', padx=4)
         tb.Button(bf, text='✏ Sửa',   command=self._edit).pack(side='left', padx=4)
         tb.Button(bf, text='🗑 Xóa',   command=self._delete).pack(side='left', padx=4)
         tb.Button(bf, text='⬆ Lên',   command=lambda: self._move(-1)).pack(side='left', padx=4)
@@ -127,13 +127,14 @@ class Sec3MucTieu(BaseSection):
         stt = 1
         for i, row in enumerate(data_rows):
             if row.get('la_tieu_de_nhom'):
+                # Still support existing groups in DB for now, but mark them
                 iid = self.tree.insert('', 'end', iid=str(i),
                                  values=('', row.get('nhom', ''), ''),
                                  tags=('group',))
             else:
                 tag = 'even' if i % 2 == 0 else 'odd'
                 self.tree.insert('', 'end', iid=str(i),
-                                 values=(f"PO{stt}",
+                                 values=(f"MT{stt}",
                                          row.get('mo_ta', ''),
                                          row.get('cdr_ma', '')),
                                  tags=(tag,))

@@ -44,7 +44,10 @@ from sections.sec5_hoc_lieu  import Sec5HocLieu
 from sections.sec6_noi_dung  import Sec6NoiDung
 from sections.sec7_pp_day    import Sec7PpDay
 from sections.sec8_kiem_tra  import Sec8KiemTra
-from sections.sec9_cap_nhat  import Sec9CapNhat
+from sections.sec9_quy_dinh  import Sec9QuyDinh
+from sections.sec10_co_so    import Sec10CoSo
+from sections.sec12_phu_luc  import Sec12PhuLuc
+from sections.sec13_cap_nhat import Sec13CapNhat
 from sections.base_section import setup_treeview_style, apply_theme, THEMES, set_window_icon, \
                                     CLR_BG, CLR_PRIMARY, CLR_PRIMARY2, CLR_TEXT, CLR_ACCENT, \
                                     CLR_SIDEBAR, CLR_SIDEBAR_FG, CLR_SIDEBAR_SEL
@@ -302,6 +305,7 @@ class QLCTDTApp:
             ('👥 Dữ liệu Chung', self.open_shared_data,     'outline-secondary'),
             ('📋 Template',      self.open_template_manager, 'outline-secondary'),
             ('📊 Thống kê',      self.open_statistics,       'outline-warning'),
+            ('🔍 Đối soát',      self.run_full_audit,        'outline-danger'),
             ('📜 Lịch sử',      self.controller.show_import_history, 'outline-secondary'),
         ]
         for item in btn_data:
@@ -385,6 +389,8 @@ class QLCTDTApp:
 
         self.nb = tb.Notebook(right, bootstyle='info')
         self.nb.pack(fill='both', expand=True, pady=4)
+        
+
 
 
         def _on_modified(sec, is_dirty):
@@ -405,21 +411,28 @@ class QLCTDTApp:
         self.sec6 = Sec6NoiDung(self.nb, self.db, lazy=True, modified_callback=_on_modified)
         self.sec7 = Sec7PpDay(self.nb, self.db, lazy=True, modified_callback=_on_modified)
         self.sec8 = Sec8KiemTra(self.nb, self.db, lazy=True, modified_callback=_on_modified)
-        self.sec9 = Sec9CapNhat(self.nb, self.db, lazy=True, modified_callback=_on_modified)
+        self.sec9 = Sec9QuyDinh(self.nb, self.db, lazy=True, modified_callback=_on_modified)
+        self.sec10 = Sec10CoSo(self.nb, self.db, lazy=True, modified_callback=_on_modified)
+        # Tab 11 reuse Sec1 data but could be a different view
+        self.sec11 = tb.Frame(self.nb) # Placeholder for now
+        self.sec12 = Sec12PhuLuc(self.nb, self.db, lazy=True, modified_callback=_on_modified)
+        self.sec13 = Sec13CapNhat(self.nb, self.db, lazy=True, modified_callback=_on_modified)
 
         tabs = [
-
             (self.sec1, '1. Thông tin chung'),
             (self.sec2, '2. Mô tả'),
             (self.sec3, '3. Mục tiêu'),
             (self.sec4, '4. Chuẩn đầu ra (CLO)'),
-            (self.sec5, '5. Học liệu'),
+            (self.sec5, '5. CSVC & Học liệu'),
             (self.sec6, '6. Nội dung chi tiết'),
             (self.sec7, '7. PP dạy học'),
             (self.sec8, '8. Kiểm tra'),
-            (self.sec9, '9. Cập nhật'),
+            (self.sec9, '9. Quy định'),
+            (self.sec11, '10. Đội ngũ GV'),
+            (self.sec12, '11. Phụ lục'),
+            (self.sec13, '12. Cập nhật'),
         ]
-        self._sections = [s for s, _ in tabs]
+        self._sections = [s for s, _ in tabs if hasattr(s, 'save')] # Filter out pure frames
         for sec, label in tabs:
             self.nb.add(sec, text=label)
         
@@ -637,6 +650,7 @@ class QLCTDTApp:
     def _on_tab_changed(self, event):
         """Khi chuyển tab, nạp dữ liệu cho tab mới nếu có học phần đang chọn."""
         active_tab = self.nb.index("current")
+        
         if 0 <= active_tab < len(self._sections):
             sec = self._sections[active_tab]
             # Đảm bảo giao diện được khởi tạo khi tab được hiển thị
@@ -868,6 +882,82 @@ class QLCTDTApp:
             f'Tác giả: VuPQ\n'
             f'Email: vupq@epu.edu.vn\n\n'
             f'Đại học Điện lực (EPU)')
+
+    def run_full_audit(self):
+        """Chạy đối soát toàn diện cho học phần hiện tại."""
+        if not self.current_hp_id:
+            show_modern_warning(self.root, 'Thông báo', 'Vui lòng chọn một học phần để đối soát.')
+            return
+        
+        # Lưu dữ liệu hiện tại trước khi audit từ DB
+        self.save_hp()
+        
+        issues = ValidationService.audit_full_consistency(self.db, self.current_hp_id)
+        if not issues:
+            show_modern_info(self.root, 'Kết quả đối soát', '✅ Dữ liệu hoàn toàn nhất quán!')
+        else:
+            _AuditDialog(self.root, issues)
+
+
+# ─── Audit Dialog ─────────────────────────────────────────────────────────────
+class _AuditDialog(tb.Toplevel):
+    def __init__(self, parent, issues):
+        super().__init__(parent)
+        set_window_icon(self)
+        self.title('Dashboard Đối soát Dữ liệu')
+        self.geometry('750x550')
+        self.issues = issues
+        self.grab_set()
+        self._build()
+        self.transient(parent)
+
+    def _build(self):
+        frm = tb.Frame(self, padding=16)
+        frm.pack(fill='both', expand=True)
+
+        tb.Label(frm, text='🔍 Dashboard Cảnh báo & Đối soát', 
+                 font=('Arial', 14, 'bold'), bootstyle='inverse-danger', padding=10).pack(fill='x', pady=(0,15))
+
+        # List of issues
+        container = tb.Frame(frm)
+        container.pack(fill='both', expand=True)
+        
+        canvas = tk.Canvas(container, highlightthickness=0)
+        vsb = tb.Scrollbar(container, orient='vertical', command=canvas.yview)
+        scroll_frm = tb.Frame(canvas)
+        
+        window_id = canvas.create_window((0,0), window=scroll_frm, anchor='nw')
+        canvas.configure(yscrollcommand=vsb.set)
+        
+        canvas.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='right', fill='y')
+
+        # Sync scroll_frm width to canvas width for proper wrapping
+        def _on_canvas_configure(e):
+            canvas.itemconfig(window_id, width=e.width)
+        canvas.bind('<Configure>', _on_canvas_configure)
+
+        for iss in self.issues:
+            card = tb.Frame(scroll_frm, bootstyle='secondary', padding=10)
+            card.pack(fill='x', pady=4, padx=5)
+            
+            header = tb.Frame(card, bootstyle='secondary')
+            header.pack(fill='x')
+            
+            color = 'danger' if iss['level'] == 'error' else 'warning'
+            icon = '❌ ERROR' if iss['level'] == 'error' else '⚠ WARNING'
+            
+            tb.Label(header, text=icon, font=('Arial', 9, 'bold'), bootstyle=color).pack(side='left')
+            tb.Label(header, text=f" [{iss['section']}]", font=('Arial', 9, 'bold'), bootstyle='secondary').pack(side='left')
+            
+            tb.Label(card, text=iss['msg'], font=('Arial', 10), 
+                     wraplength=680, bootstyle='secondary').pack(fill='x', pady=(5,0))
+
+        def _on_frame_configure(e):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        scroll_frm.bind("<Configure>", _on_frame_configure)
+
+        tb.Button(frm, text='Đóng', command=self.destroy, bootstyle='secondary', width=15).pack(pady=(15,0))
 
 
 # ─── Template Manager Dialog ──────────────────────────────────────────────────

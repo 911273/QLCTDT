@@ -34,15 +34,54 @@ class ValidationService:
         return issues
 
     @staticmethod
-    def check_duplicate_code(repo, ma, current_hp_id):
-        if not ma:
-            return None
+    def audit_full_consistency(db, hp_id):
+        """
+        Thực hiện đối soát toàn diện dữ liệu học phần từ DB.
+        """
+        issues = []
+        hp = db.get_hoc_phan(hp_id)
+        if not hp: return issues
+
+        # 1. Đối soát giờ (Sec 1 vs Sec 6)
+        nd_lt = db.get_noi_dung(hp_id, 'lt')
+        nd_th = db.get_noi_dung(hp_id, 'th')
         
-        # Đây là logic nghiệp vụ cần gọi repo
-        # Tuy nhiên Service không nên gọi trực tiếp repo nếu ta muốn tách biệt hoàn toàn.
-        # Nhưng ở đây Service layer được thiết kế để dùng Repo.
+        total_nd_hours = sum((r['gio_lt'] or 0) + (r['gio_bt'] or 0) + (r['gio_tl'] or 0) + 
+                             (r['gio_th_tn'] or 0) + (r['gio_th'] or 0) + (r['gio_kt'] or 0) 
+                             for r in nd_lt + nd_th)
         
-        # Giả sử repo có phương thức search hoặc get_by_code
-        # Hiện tại db.py chưa có get_by_code riêng ngoài execute.
-        # Ta sẽ dùng repo.db.conn tạm thời hoặc thêm phương thức vào repo.
-        return None # Sẽ bổ sung sau khi repo hoàn thiện
+        if abs(total_nd_hours - (hp['tong_gio'] or 0)) > 0.1:
+            issues.append({
+                'level': 'error',
+                'section': 'Mục 6',
+                'msg': f"Lệch tổng giờ giảng dạy: Mục 1 ({hp['tong_gio']}h) vs Mục 6 ({total_nd_hours}h)."
+            })
+
+        # 2. Đối soát trọng số (Sec 8)
+        kts = db.get_ke_hoach_kt(hp_id)
+        if kts:
+            # Nhóm theo nhom (thuong_xuyen, cuoi_ky)
+            weights = {}
+            for k in kts:
+                nhom = k['nhom']
+                weights[nhom] = k['ty_trong_nhom'] or 0
+            
+            total_weight = sum(weights.values())
+            if abs(total_weight - 100.0) > 0.1 and total_weight > 0:
+                issues.append({
+                    'level': 'warning',
+                    'section': 'Mục 8',
+                    'msg': f"Tổng trọng số các thành phần đánh giá là {total_weight}% (Kỳ vọng: 100%)."
+                })
+
+        # 3. Kiểm tra CĐR (CLO) trống
+        clos = db.get_clo(hp_id)
+        if not clos:
+             issues.append({
+                'level': 'warning',
+                'section': 'Mục 4',
+                'msg': "Học phần chưa có Chuẩn đầu ra (CLO) nào."
+            })
+
+        return issues
+

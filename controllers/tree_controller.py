@@ -126,8 +126,33 @@ class TreeController:
 
     def _load_search_results(self, kw, nature):
         nature_clause = " AND hp.tinh_chat = ?" if nature != '-- Tất cả --' else ""
-        params = [f'%{kw}%'] * 6 # 6 fields
-        if nature != '-- Tất cả --': params.append(nature)
+        
+        # Tách từ khóa thành các cụm từ/từ đơn để tìm kiếm linh hoạt (AND logic)
+        words = kw.split()
+        if not words:
+            return 0
+            
+        where_clauses = []
+        params = []
+        
+        for word in words:
+            w_param = f'%{word}%'
+            # Sử dụng hàm unaccent (đã đăng ký trong db.py) để tìm kiếm không dấu
+            clause = """(
+                unaccent(hp.ten_viet) LIKE unaccent(?) 
+                OR unaccent(hp.ma) LIKE unaccent(?) 
+                OR unaccent(k.ten) LIKE unaccent(?) 
+                OR unaccent(c.ten) LIKE unaccent(?) 
+                OR unaccent(clo.ma) LIKE unaccent(?)
+                OR unaccent(gv.ho_ten) LIKE unaccent(?)
+            )"""
+            where_clauses.append(clause)
+            params.extend([w_param] * 6)
+            
+        if nature != '-- Tất cả --':
+            params.append(nature)
+
+        where_sql = " AND ".join(where_clauses)
 
         # Tìm kiếm mở rộng: Mã, Tên, Khoa, CTĐT, CLO, Giảng viên
         sql = f"""
@@ -139,14 +164,7 @@ class TreeController:
             LEFT JOIN clo ON hp.id = clo.hp_id
             LEFT JOIN hp_giang_vien gvhp ON hp.id = gvhp.hp_id
             LEFT JOIN giang_vien gv ON gvhp.gv_id = gv.id
-            WHERE (
-                hp.ten_viet LIKE ? 
-                OR hp.ma LIKE ? 
-                OR k.ten LIKE ? 
-                OR c.ten LIKE ? 
-                OR clo.ma LIKE ?
-                OR gv.ho_ten LIKE ?
-            ) {nature_clause}
+            WHERE ({where_sql}) {nature_clause}
             ORDER BY hp.ten_viet LIMIT 500
         """
         rows = self.db.conn.execute(sql, params).fetchall()

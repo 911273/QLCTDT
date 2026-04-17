@@ -88,13 +88,13 @@ class Sec6NoiDung(BaseSection):
 class _NoiDungTab(tb.Frame):
     """Một tab nội dung (Lý thuyết hoặc Thực hành) với cây phân cấp."""
 
-    LT_COLS  = ('ten', 'lt', 'bt', 'tl', 'th_tn', 'tu_hoc', 'yeu_cau', 'cdr_ma')
-    LT_HEADS = ('Nội dung', 'LT', 'BT', 'TL', 'TH/TN', 'Tự học', 'Yêu cầu SV chuẩn bị', 'CDR HP')
-    LT_WIDTHS= (320, 40, 40, 40, 50, 55, 240, 70)
+    LT_COLS  = ('ten', 'gio_len_lop', 'pp_day', 'pp_hoc', 'cdr_ma', 'bai_danh_gia')
+    LT_HEADS = ('Các nội dung cơ bản', 'Giờ (L/B/T/T)', 'Hoạt động dạy & PP', 'Hoạt động học', 'CĐR HP', 'Bài ĐG')
+    LT_WIDTHS= (350, 90, 180, 180, 80, 80)
 
-    TH_COLS  = ('ten', 'th', 'bt', 'tl', 'kt', 'tu_hoc', 'yeu_cau', 'cdr_ma')
-    TH_HEADS = ('Nội dung', 'TH', 'BT', 'TL', 'KT', 'Tự học', 'Yêu cầu SV chuẩn bị', 'CDR HP')
-    TH_WIDTHS= (320, 40, 40, 40, 40, 55, 240, 70)
+    TH_COLS  = ('ten', 'gio_len_lop', 'pp_day', 'pp_hoc', 'cdr_ma', 'bai_danh_gia')
+    TH_HEADS = ('Nội dung thực hành', 'Giờ (T/B/T/K)', 'Hoạt động dạy & PP', 'Hoạt động học', 'CĐR HP', 'Bài ĐG')
+    TH_WIDTHS= (350, 90, 180, 180, 80, 80)
 
     def __init__(self, parent, phan, db, sec_parent, **kwargs):
         super().__init__(parent, **kwargs)
@@ -165,9 +165,12 @@ class _NoiDungTab(tb.Frame):
         tb.Button(toolbar_frm, text='📥 Nhập từ Excel', style='Accent.TButton',
                    command=self._import_excel).pack(side='left', padx=2)
         tb.Separator(toolbar_frm, orient='vertical').pack(side='left', padx=6, fill='y')
-        tb.Label(toolbar_frm, text='Tổng:', font=('Arial', 10, 'bold')).pack(side='left')
+        tb.Label(toolbar_frm, text='Tổng chi tiết:', font=('Arial', 10, 'bold')).pack(side='left')
         self.lbl_total = tb.Label(toolbar_frm, text='LT:0 BT:0', font=('Arial', 10))
         self.lbl_total.pack(side='left', padx=4)
+        
+        self.lbl_diff = tb.Label(toolbar_frm, text='', font=('Arial', 10, 'italic'))
+        self.lbl_diff.pack(side='left', padx=20)
 
     def update_theme(self):
         pass # rely on base_section.setup_treeview_style() if global
@@ -279,15 +282,11 @@ class _NoiDungTab(tb.Frame):
         # Thêm hàng Tổng
         totals = self._update_totals()
         if self.phan == 'lt':
-            vals = ('Tổng',
-                    self._fmt_num(totals.get('gio_lt')), self._fmt_num(totals.get('gio_bt')),
-                    self._fmt_num(totals.get('gio_tl')), self._fmt_num(totals.get('gio_th_tn')),
-                    self._fmt_num(totals.get('gio_tu_hoc')), '', '')
+            gio_str = f"({totals.get('gio_lt'):g}/{totals.get('gio_bt'):g}/{totals.get('gio_tl'):g}/{totals.get('gio_th_tn'):g})"
+            vals = ('TỔNG CỘNG', gio_str, '', '', '', '')
         else:
-            vals = ('Tổng',
-                    self._fmt_num(totals.get('gio_th')), self._fmt_num(totals.get('gio_bt')),
-                    self._fmt_num(totals.get('gio_tl')), self._fmt_num(totals.get('gio_kt')),
-                    self._fmt_num(totals.get('gio_tu_hoc')), '', '')
+            gio_str = f"({totals.get('gio_th'):g}/{totals.get('gio_bt'):g}/{totals.get('gio_tl'):g}/{totals.get('gio_kt'):g})"
+            vals = ('TỔNG CỘNG', gio_str, '', '', '', '')
         
         self.tree.insert('', 'end', iid='total_row', values=vals, tags=('total',))
 
@@ -387,18 +386,18 @@ class _NoiDungTab(tb.Frame):
     def _row_values(self, r):
         if self.phan == 'lt':
             indent = '  ' * max(0, r.get('cap_do', 1) - 1)
+            gio_str = f"({r.get('gio_lt') or 0:g}/{r.get('gio_bt') or 0:g}/{r.get('gio_tl') or 0:g}/{r.get('gio_th_tn') or 0:g})"
             return (indent + (r.get('ten') or ''),
-                    r.get('gio_lt') or '', r.get('gio_bt') or '',
-                    r.get('gio_tl') or '', r.get('gio_th_tn') or '',
-                    r.get('gio_tu_hoc') or '', r.get('yeu_cau') or '',
-                    r.get('cdr_ma') or '')
+                    gio_str,
+                    r.get('pp_day') or '', r.get('pp_hoc') or '',
+                    r.get('cdr_ma') or '', r.get('bai_danh_gia') or '')
         else:
             indent = '  ' * max(0, r.get('cap_do', 1) - 1)
+            gio_str = f"({r.get('gio_th') or 0:g}/{r.get('gio_bt') or 0:g}/{r.get('gio_tl') or 0:g}/{r.get('gio_kt') or 0:g})"
             return (indent + (r.get('ten') or ''),
-                    r.get('gio_th') or '', r.get('gio_bt') or '',
-                    r.get('gio_tl') or '', r.get('gio_kt') or '',
-                    r.get('gio_tu_hoc') or '', r.get('yeu_cau') or '',
-                    r.get('cdr_ma') or '')
+                    gio_str,
+                    r.get('pp_day') or '', r.get('pp_hoc') or '',
+                    r.get('cdr_ma') or '', r.get('bai_danh_gia') or '')
 
     def _fmt_num(self, val):
         if val is None or val == 0: return ''
@@ -408,14 +407,45 @@ class _NoiDungTab(tb.Frame):
         top_level = [r for r in self._flat if r.get('_parent_tid') is None]
         totals = {}
         if self.phan == 'lt':
-            for k in ('gio_lt', 'gio_bt', 'gio_tl', 'gio_th_tn', 'gio_tu_hoc'):
+            keys = ('gio_lt', 'gio_bt', 'gio_tl', 'gio_th_tn', 'gio_tu_hoc')
+            for k in keys:
                 totals[k] = sum(float(r.get(k) or 0) for r in top_level)
-            self.lbl_total.config(text=f"LT:{totals['gio_lt']:g}  BT:{totals['gio_bt']:g}")
+            self.lbl_total.config(text=f"LT:{totals['gio_lt']:g} BT:{totals['gio_bt']:g} TL:{totals['gio_tl']:g} TH/TN:{totals['gio_th_tn']:g} Tự học:{totals['gio_tu_hoc']:g}")
         else:
-            for k in ('gio_th', 'gio_bt', 'gio_tl', 'gio_kt', 'gio_tu_hoc'):
+            keys = ('gio_th', 'gio_bt', 'gio_tl', 'gio_kt', 'gio_tu_hoc')
+            for k in keys:
                 totals[k] = sum(float(r.get(k) or 0) for r in top_level)
-            self.lbl_total.config(text=f"TH:{totals['gio_th']:g}")
+            self.lbl_total.config(text=f"TH:{totals['gio_th']:g} BT:{totals['gio_bt']:g} TL:{totals['gio_tl']:g} KT:{totals['gio_kt']:g} Tự học:{totals['gio_tu_hoc']:g}")
+        
+        # Cross-check with Sec 1
+        self._check_with_sec1(totals)
         return totals
+
+    def _check_with_sec1(self, current_totals):
+        try:
+            # Truy cập Sec1 thông qua main (sec_parent -> main)
+            main = self.sec_parent.winfo_toplevel()
+            if hasattr(main, 'sec1'):
+                sec1_data = main.sec1.get_time_allocation()
+                mismatches = []
+                
+                check_map = {
+                    'lt': [('gio_lt', 'Lý thuyết'), ('gio_bt', 'Bài tập'), ('gio_tl', 'Thảo luận'), ('gio_th_tn', 'TH/TN'), ('gio_tu_hoc', 'Tự học')],
+                    'th': [('gio_th', 'Thực hành'), ('gio_bt', 'Bài tập'), ('gio_tl', 'Thảo luận'), ('gio_kt', 'Kiểm tra'), ('gio_tu_hoc', 'Tự học')]
+                }
+                
+                for key, label in check_map[self.phan]:
+                    s1_val = sec1_data.get(key, 0)
+                    s6_val = current_totals.get(key, 0)
+                    if abs(s1_val - s6_val) > 0.001:
+                        mismatches.append(f"{label}: {s6_val:g}/{s1_val:g}")
+                
+                if mismatches:
+                    self.lbl_diff.config(text="⚠ Sai lệch với Mục 1: " + ", ".join(mismatches), bootstyle='danger')
+                else:
+                    self.lbl_diff.config(text="✔ Khớp với Mục 1", bootstyle='success')
+        except:
+            pass
 
     def _get_selected_row(self):
         sel = self.tree.selection()
@@ -444,8 +474,10 @@ class _NoiDungTab(tb.Frame):
                 ('gio_tl',    'Giờ Thảo luận (TL)',  'entry', {}),
                 ('gio_th_tn', 'Giờ TH/Thí nghiệm',  'entry', {}),
                 ('gio_tu_hoc','Giờ Tự học',          'entry', {}),
-                ('yeu_cau',   'Yêu cầu SV chuẩn bị','text',  {}),
-                ('cdr_ma',    'CDR học phần',         'multi_picker', {'values': self.sec_parent.clo_list}),
+                ('pp_day',    'Hoạt động dạy & PP','text',  {}),
+                ('pp_hoc',    'Hoạt động học',     'text',  {}),
+                ('cdr_ma',    'CDR đáp ứng',         'multi_picker', {'values': self.sec_parent.clo_list}),
+                ('bai_danh_gia', 'Bài đánh giá (VD: KTGK)', 'entry', {}),
             ]
         else:
             return [
@@ -456,8 +488,10 @@ class _NoiDungTab(tb.Frame):
                 ('gio_tl',    'Giờ Thảo luận',       'entry', {}),
                 ('gio_kt',    'Giờ Kiểm tra',        'entry', {}),
                 ('gio_tu_hoc','Giờ Tự học',          'entry', {}),
-                ('yeu_cau',   'Yêu cầu SV chuẩn bị','text',  {}),
-                ('cdr_ma',    'CDR học phần',         'multi_picker', {'values': self.sec_parent.clo_list}),
+                ('pp_day',    'Hoạt động dạy & PP','text',  {}),
+                ('pp_hoc',    'Hoạt động học',     'text',  {}),
+                ('cdr_ma',    'CDR đáp ứng',         'multi_picker', {'values': self.sec_parent.clo_list}),
+                ('bai_danh_gia', 'Bài đánh giá (VD: KTGK)', 'entry', {}),
             ]
 
     def _result_to_row(self, result, cap_do, parent_tid, thu_tu):
@@ -466,7 +500,10 @@ class _NoiDungTab(tb.Frame):
         row = {'_tid': id(result), '_parent_tid': parent_tid,
                'cap_do': cap_do, 'thu_tu': thu_tu, 'in_dam': in_dam,
                'loai': loai,
-               'ten': result.get('ten', ''), 'yeu_cau': result.get('yeu_cau', ''),
+               'ten': result.get('ten', ''), 
+               'pp_day': result.get('pp_day', ''), 
+               'pp_hoc': result.get('pp_hoc', ''),
+               'bai_danh_gia': result.get('bai_danh_gia', ''),
                'cdr_ma': result.get('cdr_ma', '')}
         for k in ('gio_lt', 'gio_bt', 'gio_tl', 'gio_th_tn', 'gio_tu_hoc',
                   'gio_th', 'gio_kt', 'gio_bt_th'):
@@ -483,7 +520,27 @@ class _NoiDungTab(tb.Frame):
         thu_tu = len(siblings) + 1
         fields = self._make_fields(cap_do)
         init = {'in_dam': 'Có' if cap_do == 1 else 'Không'}
-        dlg = RowEditDialog(self.winfo_toplevel(), f'Thêm mục cấp {cap_do}', fields, initial=init)
+        
+        def _on_dlg_build(dlg):
+            if self.phan == 'lt':
+                def _suggest_tu_hoc():
+                    try:
+                        lt = float(dlg.entries['gio_lt'].get() or 0)
+                        bt = float(dlg.entries['gio_bt'].get() or 0)
+                        tl = float(dlg.entries['gio_tl'].get() or 0)
+                        th = float(dlg.entries['gio_th_tn'].get() or 0)
+                        suggested = lt * 2 + bt * 1 + tl * 1 + th * 1
+                        dlg.entries['gio_tu_hoc'].delete(0, tk.END)
+                        dlg.entries['gio_tu_hoc'].insert(0, f"{suggested:g}")
+                    except: pass
+                
+                btn_suggest = tb.Button(dlg.btn_frame, text='💡 Gợi ý Tự học', 
+                                        bootstyle='info-outline', command=_suggest_tu_hoc)
+                btn_suggest.pack(side='left', padx=5)
+
+        dlg = RowEditDialog(self.winfo_toplevel(), f'Thêm mục cấp {cap_do}', fields, 
+                            initial=init, on_build=_on_dlg_build)
+
         if dlg.result:
             self._save_undo()
             row = self._result_to_row(dlg.result, cap_do, parent_tid, thu_tu)
@@ -533,7 +590,27 @@ class _NoiDungTab(tb.Frame):
                   'gio_th', 'gio_kt'):
             v = row.get(k)
             init[k] = str(v) if v is not None else ''
-        dlg = RowEditDialog(self.winfo_toplevel(), 'Sửa nội dung', fields, initial=init)
+            
+        def _on_dlg_build(dlg):
+            if self.phan == 'lt':
+                def _suggest_tu_hoc():
+                    try:
+                        lt = float(dlg.entries['gio_lt'].get() or 0)
+                        bt = float(dlg.entries['gio_bt'].get() or 0)
+                        tl = float(dlg.entries['gio_tl'].get() or 0)
+                        th = float(dlg.entries['gio_th_tn'].get() or 0)
+                        suggested = lt * 2 + bt * 1 + tl * 1 + th * 1
+                        dlg.entries['gio_tu_hoc'].delete(0, tk.END)
+                        dlg.entries['gio_tu_hoc'].insert(0, f"{suggested:g}")
+                    except: pass
+                
+                btn_suggest = tb.Button(dlg.btn_frame, text='💡 Gợi ý Tự học', 
+                                        bootstyle='info-outline', command=_suggest_tu_hoc)
+                btn_suggest.pack(side='left', padx=5)
+
+        dlg = RowEditDialog(self.winfo_toplevel(), 'Sửa nội dung', fields, 
+                            initial=init, on_build=_on_dlg_build)
+
         if dlg.result:
             self._save_undo()
             updated = self._result_to_row(dlg.result, row['cap_do'],

@@ -36,10 +36,10 @@ class Sec4Clo(BaseSection):
         content = tb.Frame(self, padding=(16, 4, 16, 4))
         content.pack(fill='both', expand=True)
 
-        cols   = ('ma', 'mo_ta', 'cdr_ma')
-        heads  = ('CDR học phần', 'Mô tả', 'CDR CTĐT')
-        widths = (100, 540, 100)
-        aligns = ('center', 'w', 'center')
+        cols   = ('ma', 'mo_ta', 'cdr_ma', 'level_irm')
+        heads  = ('CDR học phần', 'Mô tả', 'CDR CTĐT', 'Mức độ')
+        widths = (100, 480, 100, 60)
+        aligns = ('center', 'w', 'center', 'center')
         self.tree_frm, self.tree = make_tree(content, cols, heads, widths, height=14, column_aligns=aligns, db=self.db, table_id='sec4_clo')
         self.tree_frm.pack(fill='both', expand=True)
         self.tree.bind('<Double-1>', lambda _e: self._edit())
@@ -91,7 +91,7 @@ class Sec4Clo(BaseSection):
             if s not in res: res.append(s)
         return res
 
-    def _fields(self, initial_cdr='', initial_nhom='Kiến thức'):
+    def _fields(self, initial_cdr='', initial_nhom='Kiến thức', initial_irm='I'):
         # Nếu có initial_cdr (ví dụ 'PI1.1, PI1.2'), ta cần tìm string đầy đủ cho các mã
         full_cdr = initial_cdr
         if initial_cdr:
@@ -102,37 +102,26 @@ class Sec4Clo(BaseSection):
             full_cdr = ", ".join(full_list)
         
         return [
-            ('nhom',   'Nhóm',               'combo', {'values': self.CLO_GROUPS}),
+            # ('nhom',   'Nhóm',               'combo', {'values': self.CLO_GROUPS}), # Removed grouping
             ('ma',     'Mã CLO (vd: CLO1)', 'entry', {}),
             ('mo_ta',  'Mô tả',              'text',  {}),
             ('cdr_ma_full', 'CDR CTĐT',       'multi_picker', {'values': self._get_cdr_list()}),
-        ], {'cdr_ma_full': full_cdr, 'nhom': initial_nhom}
+            ('level_irm', 'Mức độ (I/R/M)',   'combo', {'values': ['I', 'R', 'M']}),
+        ], {'cdr_ma_full': full_cdr, 'level_irm': initial_irm}
 
     def _refresh(self, rows):
         self.tree.delete(*self.tree.get_children())
         self.tree.tag_configure('group', font=('Arial', 10, 'bold', 'italic'), 
                                background=CLR_HDR, foreground=CLR_PRIMARY2)
         
-        # Chỉ lấy các CLO thực (bỏ qua header cũ nếu có)
+        # Chỉ lấy các CLO thực
         clos = [r for r in rows if not r.get('la_tieu_de_nhom')]
         
-        # Sắp xếp theo thứ tự nhóm chuẩn, sau đó theo thứ tự xuất hiện trong rows
-        order_map = {g: i for i, g in enumerate(self.CLO_GROUPS)}
-        clos.sort(key=lambda r: (order_map.get(r.get('nhom'), 99), rows.index(r)))
-        
-        current_group = None
         for i, r in enumerate(clos):
-            nhom = r.get('nhom', 'Kiến thức')
-            if nhom != current_group:
-                current_group = nhom
-                self.tree.insert('', 'end', iid=f"grp_{nhom}_{i}",
-                                 values=('', nhom, ''),
-                                 tags=('group',))
-            
             tag = 'even' if i % 2 == 0 else 'odd'
-            # iid dùng index gốc của rows để đồng bộ với self._rows
             self.tree.insert('', 'end', iid=str(rows.index(r)),
-                             values=(r.get('ma', ''), r.get('mo_ta', ''), r.get('cdr_ma', '')),
+                             values=(r.get('ma', ''), r.get('mo_ta', ''), 
+                                     r.get('cdr_ma', ''), r.get('level_irm', 'I')),
                              tags=(tag,))
         self._rows = rows
 
@@ -141,6 +130,7 @@ class Sec4Clo(BaseSection):
         db_rows = self.db.get_clo(hp_id)
         # Bỏ qua các hàng là tiêu đề nhóm từ DB cũ, chuẩn hóa về CLO thực
         self._rows = [{'ma': r['ma'], 'mo_ta': r['mo_ta'], 'cdr_ma': r['cdr_ma'],
+                       'level_irm': r['level_irm'] if r['level_irm'] else 'I',
                        'nhom': r['nhom'] or 'Kiến thức', 'la_tieu_de_nhom': 0}
                       for r in db_rows if not r['la_tieu_de_nhom']]
         self._refresh(self._rows)
@@ -215,10 +205,11 @@ class Sec4Clo(BaseSection):
             codes = [c.split(':')[0].strip() for c in cdr_full.split(',') if c.strip()]
             ma_pi = ", ".join(codes)
             self._rows.append({'la_tieu_de_nhom': 0, 
-                               'nhom': dlg.result.get('nhom', 'Kiến thức'),
+                               'nhom': None,
                                'ma': new_ma,
                                'mo_ta': dlg.result.get('mo_ta', ''),
-                               'cdr_ma': ma_pi})
+                               'cdr_ma': ma_pi,
+                               'level_irm': dlg.result.get('level_irm', 'I')})
             self._refresh(self._rows)
             self.mark_modified()
 
@@ -249,6 +240,7 @@ class Sec4Clo(BaseSection):
             row['ma'] = new_ma
             row['mo_ta'] = dlg.result.get('mo_ta', '')
             row['cdr_ma'] = ma_pi
+            row['level_irm'] = dlg.result.get('level_irm', 'I')
             self._refresh(self._rows)
             self.mark_modified()
 
@@ -292,7 +284,7 @@ class Sec4Clo(BaseSection):
     # ── Drag and Drop Logic ──────────────────────────────────────────────────
     def _on_drag_start(self, event):
         iid = self.tree.identify_row(event.y)
-        if not iid or iid.startswith('grp_'): return
+        if not iid: return
         self._drag_idx = int(iid)
 
     def _on_drag_motion(self, event):
@@ -308,21 +300,7 @@ class Sec4Clo(BaseSection):
         
         source_row = self._rows[source_idx]
         
-        if target_iid.startswith('grp_'):
-            # Thả vào tiêu đề nhóm
-            new_nhom = target_iid.split('_')[1]
-            self._save_undo()
-            source_row['nhom'] = new_nhom
-            # Di chuyển tới đầu nhóm (tìm index đầu tiên của nhóm này trong _rows)
-            # Hoặc đơn giản là di chuyển tới vị trí của item cuối cùng của nhóm này
-            # Ở đây ta chỉ cần đổi nhom, sort ở _refresh sẽ lo phần còn lại.
-            # Nhưng để có vẻ "di chuyển" thật sự, ta nên dời nó trong list.
-            self._refresh(self._rows)
-            self.mark_modified()
-            return
-
         target_idx = int(target_iid)
-        target_row = self._rows[target_idx]
         
         # Determine if dropping above or below
         bbox = self.tree.bbox(target_iid)
@@ -337,11 +315,10 @@ class Sec4Clo(BaseSection):
         if source_idx < new_idx:
             new_idx -= 1
             
-        if source_idx == new_idx and source_row['nhom'] == target_row['nhom']:
+        if source_idx == new_idx:
             return
         
         self._save_undo()
-        source_row['nhom'] = target_row['nhom']
         row = self._rows.pop(source_idx)
         self._rows.insert(new_idx, row)
         self._refresh(self._rows)
