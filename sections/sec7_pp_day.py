@@ -42,6 +42,7 @@ class Sec7PpDay(BaseSection):
         self.txt.configure(yscrollcommand=vsb.set)
         self.txt.pack(side='left', fill='both', expand=True)
         vsb.pack(side='right', fill='y')
+        self.txt.bind('<KeyRelease>', lambda _: self.mark_modified())
 
     def load(self, hp_id):
         super().load(hp_id)
@@ -49,6 +50,7 @@ class Sec7PpDay(BaseSection):
         self.txt.delete('1.0', 'end')
         val = hp['pp_day_hoc'] if hp and hp['pp_day_hoc'] else ''
         self.txt.insert('1.0', val)
+        self._loading = False
 
     def save(self):
         if self.hp_id is not None:
@@ -74,4 +76,5 @@ class Sec7PpDay(BaseSection):
         
         self.txt.delete('1.0', 'end')
         self.txt.insert('1.0', suggestion)
+        self.mark_modified()
         show_modern_info(self, 'Hoàn thành', 'Đã điền nội dung mẫu dựa trên tính chất học phần.')

@@ -6,11 +6,7 @@ Dùng để SchemaManagerPanel notify DCEditorSection reload
 mà không cần truyền callback lồng nhau.
 
 Events được dùng trong hệ thống:
-  'schema.changed'     — khi thêm/sửa/xóa schema       (kwargs: schema_id)
-  'section.changed'    — khi thêm/sửa/xóa/reorder sec  (kwargs: schema_id)
-  'field.changed'      — khi thêm/sửa/xóa field         (kwargs: section_id, schema_id)
-  'field.col.changed'  — khi sửa cột của bảng           (kwargs: field_def_id)
-  'de_cuong.saved'     — khi lưu dữ liệu đề cương       (kwargs: dc_id)
+  'de_cuong.saved'     — khi lưu dữ liệu đề cương (kwargs: hp_id)
 """
 
 

@@ -13,15 +13,18 @@ class CLOPickerDialog(tb.Toplevel):
     
     def __init__(self, parent, db, hp_id, current_selected=''):
         super().__init__(parent)
-        self.title('Chọn CĐR liên quan')
+        abbr_clo = db.get_config('abbr_clo', 'CLO')
+        self.title(f'Chọn {abbr_clo} liên quan')
         self.resizable(False, False)
         self.result = None
         
         self._vars = {}
         clo_list = db.get_clo(hp_id) if hp_id else []
+        from utils.data_utils import natural_sort_key
+        clo_list.sort(key=lambda x: natural_sort_key(x.get('ma', '')))
         selected_codes = [c.strip() for c in current_selected.split(',') if c.strip()]
         
-        tb.Label(self, text='Chọn các CĐR (CLO) liên quan:',
+        tb.Label(self, text=f'Chọn các {abbr_clo} liên quan:',
                  font=('Arial', 10, 'bold')).pack(anchor='w', padx=16, pady=(12, 4))
         
         frm = ScrollableFrame(self) if len(clo_list) > 8 else tb.Frame(self)
@@ -29,7 +32,7 @@ class CLOPickerDialog(tb.Toplevel):
         inner = frm.inner if hasattr(frm, 'inner') else frm
         
         if not clo_list:
-            tb.Label(inner, text='⚠ Chưa có CLO nào. Vui lòng điền Tab 4 trước.',
+            tb.Label(inner, text=f'⚠ Chưa có {abbr_clo} nào. Vui lòng điền Tab 4 trước.',
                      bootstyle='warning').pack(pady=8)
         
         for clo in clo_list:
@@ -340,8 +343,9 @@ class Sec8KiemTra(BaseSection):
 
         # Định nghĩa các chỉ số cần hiển thị
         self._summary_labels = {}
+        abbr_clo = self.get_abbr('CLO', 'CLO')
         metrics = [
-            ('clo',      '📌 CLO:',              'col=0,row=0'),
+            ('clo',      f'📌 {abbr_clo}:',              'col=0,row=0'),
             ('lt',       '📖 Nội dung LT:',      'col=2,row=0'),
             ('danh_gia', '⚖ Đánh giá:',         'col=0,row=1'),
             ('rubric',   '📋 Rubric:',           'col=2,row=1'),
@@ -356,11 +360,14 @@ class Sec8KiemTra(BaseSection):
             (0, 6), (1, 6),
         ]
 
+        self._metric_captions = {} 
         for i, (key, caption, _) in enumerate(metrics):
             r, c = divmod(i, 2)
-            tb.Label(summary_grid, text=caption,
+            lbl_cap = tb.Label(summary_grid, text=caption,
                      font=('Arial', 10), width=16, anchor='w'
-                     ).grid(row=r, column=c*2, sticky='w', padx=(8, 2), pady=2)
+                     )
+            lbl_cap.grid(row=r, column=c*2, sticky='w', padx=(8, 2), pady=2)
+            self._metric_captions[key] = lbl_cap
             self._summary_labels[key] = tb.Label(
                 summary_grid, text='—',
                 font=('Arial', 10, 'bold'), anchor='w'
@@ -375,6 +382,15 @@ class Sec8KiemTra(BaseSection):
             command=self._refresh_summary,
             padding=2
         ).pack(anchor='e', padx=8, pady=(0, 4))
+
+    def refresh_labels(self):
+        """Cập nhật lại các nhãn khi cấu hình viết tắt thay đổi."""
+        if not self._ui_built: return
+        abbr_clo = self.get_abbr('CLO', 'CLO')
+        if 'clo' in self._metric_captions:
+            self._metric_captions['clo'].config(text=f'📌 {abbr_clo}:')
+        if hasattr(self, 'kt_tree') and self.kt_tree:
+            self.kt_tree.heading('clo_lien_quan', text=f'{abbr_clo} liên quan')
 
     def _on_kt_cell_changed(self, row_id, col_id, new_val):
         """Sync thay đổi inline edit về self._kt_rows."""
@@ -443,14 +459,15 @@ class Sec8KiemTra(BaseSection):
 
     # ─── Kế hoạch KT ─────────────────────────────────────────────────────────
     def _kt_fields(self, nhom):
+        abbr_clo = self.get_abbr('CLO', 'CLO')
         return [
             ('noi_dung',          'Bài đánh giá',                    'text',  {}),
             ('hinh_thuc',         'Hình thức đánh giá',              'entry', {}),
             ('tieu_chi',          'Tiêu chí đánh giá (mã Rubric)',   'entry', {}),
-            ('clo_lien_quan', 'CĐR được đánh giá', 'entry_with_btn',
-             {'btn_text': '🔗 Chọn CLO', 'btn_cmd_key': 'pick_clo'}),
-            ('diem_toi_da_cdr',   'Điểm tối đa của CĐR',            'entry', {}),
-            ('trong_so_cdr',      'Trọng số đánh giá theo CĐR (%)', 'entry', {}),
+            ('clo_lien_quan', f'{abbr_clo} được đánh giá', 'entry_with_btn',
+             {'btn_text': f'🔗 Chọn {abbr_clo}', 'btn_cmd_key': 'pick_clo'}),
+            ('diem_toi_da_cdr',   f'Điểm tối đa của {abbr_clo}',            'entry', {}),
+            ('trong_so_cdr',      f'Trọng số đánh giá theo {abbr_clo} (%)', 'entry', {}),
             ('thoi_gian',         'Thời gian',                       'entry', {}),
             ('thang_diem',        'Thang điểm',                      'entry', {}),
             ('cap_do',            'Mức độ đáp ứng CDR học phần',     'entry', {}),
@@ -481,7 +498,7 @@ class Sec8KiemTra(BaseSection):
                                                 r.get('noi_dung', ''),
                                                 r.get('hinh_thuc', ''),
                                                 r.get('tieu_chi', ''),
-                                                r.get('clo_lien_quan', ''),
+                                                self.extract_codes(r.get('clo_lien_quan', '')),
                                                 r.get('diem_toi_da_cdr', ''),
                                                 r.get('trong_so_cdr', '')),
                                         tags=(tag,))
@@ -548,6 +565,7 @@ class Sec8KiemTra(BaseSection):
         self._update_pct_pill()
         self._update_paste_btn_state()
         self._after_load_summary()
+        self._loading = False
 
     def save(self):
         """FIXED M-09: Lưu trực tiếp qua DB thay vì dùng self.controller (không tồn tại trong BaseSection)."""

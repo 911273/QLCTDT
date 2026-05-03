@@ -132,10 +132,10 @@ class Sec1ThongTin(BaseSection):
         gv_lf = tb.Labelframe(p, text='1.3. Các giảng viên phụ trách học phần', padding=10)
         gv_lf.grid(row=r, column=0, columnspan=4, sticky='ew', padx=16, pady=8)
 
-        cols   = ('stt', 'vai_tro', 'ho_ten', 'don_vi', 'sdt', 'email')
-        heads  = ('TT', 'Vai trò', 'Học hàm, Học vị, Họ và tên', 'Đơn vị công tác', 'Số ĐT', 'Email')
-        widths = (35, 140, 250, 150, 110, 180)
-        aligns = ('center', 'w', 'w', 'w', 'center', 'center')
+        cols   = ('stt', 'vai_tro', 'ho_ten', 'ma_can_bo', 'chuc_vu', 'don_vi', 'sdt', 'email')
+        heads  = ('TT', 'Vai trò', 'Học hàm, Học vị, Họ và tên', 'Mã CB', 'Chức vụ', 'Đơn vị công tác', 'Số ĐT', 'Email')
+        widths = (35, 140, 250, 80, 120, 150, 110, 180)
+        aligns = ('center', 'w', 'w', 'center', 'w', 'w', 'center', 'center')
         self.gv_frm, self.gv_tree = make_tree(gv_lf, cols, heads, widths, height=6, column_aligns=aligns, db=self.db, table_id='sec1_gv',
                                                undo_manager=self.undo_mgr, on_change=self.mark_modified)
         self.gv_frm.pack(fill='x', expand=True)
@@ -376,10 +376,15 @@ class Sec1ThongTin(BaseSection):
                 'sdt': rd.get('sdt') or '',
                 'email': rd.get('email') or '', 
                 'vai_tro': rd.get('vai_tro'),
-                'thu_tu': rd.get('thu_tu')
+                'thu_tu': rd.get('thu_tu'),
+                'ma_can_bo': rd.get('ma_can_bo') or '',
+                'gioi_tinh': rd.get('gioi_tinh') or '',
+                'chuc_vu': rd.get('chuc_vu') or '',
+                'dia_chi': rd.get('dia_chi') or ''
             })
         self._gv_refresh()
         self._initial_data = self.get_data_dict()
+        self._loading = False
 
     def save(self):
         if self.hp_id is None:
@@ -547,6 +552,8 @@ class Sec1ThongTin(BaseSection):
                                 values=(stt_c[vr],
                                         VAI_TRO_LABEL.get(vr, vr),
                                         ho_ten_full,
+                                        r.get('ma_can_bo', ''),
+                                        r.get('chuc_vu', ''),
                                         r.get('don_vi', ''),
                                         r.get('sdt', ''),
                                         r.get('email', '')),
@@ -554,12 +561,16 @@ class Sec1ThongTin(BaseSection):
 
     def _gv_fields(self, initial=None):
         return [
-            ('ho_ten',  'Họ và tên',      'entry_with_btn', {'btn_text': '👥 Chọn', 'btn_cmd_key': 'pick_gv'}),
-            ('hoc_vi',  'Học hàm, học vị', 'entry', {}),
-            ('don_vi',  'Đơn vị công tác', 'entry', {}),
-            ('sdt',     'Số điện thoại',  'entry', {}),
-            ('email',   'Email',          'entry', {}),
-            ('vai_tro', 'Vai trò',        'combo', {'values': list(VAI_TRO_LABEL.values())}),
+            ('ho_ten',    'Họ và tên',      'entry_with_btn', {'btn_text': '👥 Chọn', 'btn_cmd_key': 'pick_gv'}),
+            ('ma_can_bo', 'Mã cán bộ',      'entry', {}),
+            ('gioi_tinh', 'Giới tính',      'combo', {'values': ['Nam', 'Nữ', 'Khác']}),
+            ('chuc_vu',   'Chức vụ',        'entry', {}),
+            ('hoc_vi',    'Học hàm, học vị', 'entry', {}),
+            ('don_vi',    'Đơn vị công tác', 'entry', {}),
+            ('sdt',       'Số điện thoại',  'entry', {}),
+            ('email',     'Email',          'entry', {}),
+            ('dia_chi',   'Địa chỉ',        'entry', {}),
+            ('vai_tro',   'Vai trò',        'combo', {'values': list(VAI_TRO_LABEL.values())}),
         ]
 
     def _gv_add(self):
@@ -570,10 +581,14 @@ class Sec1ThongTin(BaseSection):
             vai_tro = 'chinh' if 'chính' in vr_label else 'tham_gia'
             self._gv_rows.append({'gv_id': None,
                                    'ho_ten': dlg.result.get('ho_ten', ''),
+                                   'ma_can_bo': dlg.result.get('ma_can_bo', ''),
+                                   'gioi_tinh': dlg.result.get('gioi_tinh', ''),
+                                   'chuc_vu': dlg.result.get('chuc_vu', ''),
                                    'hoc_vi': dlg.result.get('hoc_vi', ''),
                                    'don_vi': dlg.result.get('don_vi', ''),
                                    'sdt': dlg.result.get('sdt', ''),
                                    'email': dlg.result.get('email', ''),
+                                   'dia_chi': dlg.result.get('dia_chi', ''),
                                    'vai_tro': vai_tro,
                                    'thu_tu': len(self._gv_rows) + 1})
             self._gv_refresh()
@@ -591,10 +606,18 @@ class Sec1ThongTin(BaseSection):
             self.gv_tree.snapshot()
             vr_label = dlg.result.get('vai_tro', '')
             vai_tro = 'chinh' if 'chính' in vr_label else 'tham_gia'
-            row.update({'ho_ten': dlg.result['ho_ten'], 'hoc_vi': dlg.result['hoc_vi'],
-                        'don_vi': dlg.result.get('don_vi', ''),
-                        'sdt': dlg.result['sdt'], 'email': dlg.result['email'],
-                        'vai_tro': vai_tro})
+            row.update({
+                'ho_ten': dlg.result['ho_ten'],
+                'ma_can_bo': dlg.result.get('ma_can_bo', ''),
+                'gioi_tinh': dlg.result.get('gioi_tinh', ''),
+                'chuc_vu': dlg.result.get('chuc_vu', ''),
+                'hoc_vi': dlg.result['hoc_vi'],
+                'don_vi': dlg.result.get('don_vi', ''),
+                'sdt': dlg.result['sdt'],
+                'email': dlg.result['email'],
+                'dia_chi': dlg.result.get('dia_chi', ''),
+                'vai_tro': vai_tro
+            })
             self._gv_refresh()
             self.mark_modified()
 
@@ -636,10 +659,14 @@ class Sec1ThongTin(BaseSection):
                 gv = dict(gv_raw) if not isinstance(gv_raw, dict) else gv_raw
                 self._gv_rows.append({'gv_id': gv.get('id'),
                                        'ho_ten': gv.get('ho_ten', ''),
+                                       'ma_can_bo': gv.get('ma_can_bo') or '',
+                                       'gioi_tinh': gv.get('gioi_tinh') or '',
+                                       'chuc_vu': gv.get('chuc_vu') or '',
                                        'hoc_vi': gv.get('hoc_vi') or '',
                                        'don_vi': gv.get('don_vi') or '',
                                        'sdt': gv.get('sdt') or '',
                                        'email': gv.get('email') or '',
+                                       'dia_chi': gv.get('dia_chi') or '',
                                        'vai_tro': vai_tro,
                                        'thu_tu': len(self._gv_rows)+1})
             self._gv_refresh()
@@ -672,10 +699,14 @@ class Sec1ThongTin(BaseSection):
             # Nếu được gọi từ RowEditDialog, điền thêm các field khác
             if dialog and hasattr(dialog, '_vars'):
                 d_vars = dialog._vars
+                if 'ma_can_bo' in d_vars: d_vars['ma_can_bo'].set(gv.get('ma_can_bo') or '')
+                if 'gioi_tinh' in d_vars: d_vars['gioi_tinh'].set(gv.get('gioi_tinh') or 'Nam')
+                if 'chuc_vu' in d_vars: d_vars['chuc_vu'].set(gv.get('chuc_vu') or '')
                 if 'hoc_vi' in d_vars: d_vars['hoc_vi'].set(gv.get('hoc_vi') or '')
                 if 'don_vi' in d_vars: d_vars['don_vi'].set(gv.get('don_vi') or '')
                 if 'sdt' in d_vars: d_vars['sdt'].set(gv.get('sdt') or '')
                 if 'email' in d_vars: d_vars['email'].set(gv.get('email') or '')
+                if 'dia_chi' in d_vars: d_vars['dia_chi'].set(gv.get('dia_chi') or '')
                 
                 vrl = dlg.v_vaitro.get()
                 if 'vai_tro' in d_vars: d_vars['vai_tro'].set(vrl)
@@ -771,9 +802,9 @@ class _GvPickDialog(tb.Toplevel):
         tb.Entry(frm, textvariable=self.v_search, width=50,
                   font=('Arial', 10)).pack(fill='x', pady=4)
 
-        cols = ('ho_ten', 'hoc_vi', 'sdt', 'email')
-        heads = ('Họ và tên', 'Học vị', 'SĐT', 'Email')
-        widths = (200, 100, 110, 200)
+        cols = ('ho_ten', 'ma_can_bo', 'hoc_vi', 'chuc_vu', 'sdt', 'email')
+        heads = ('Họ và tên', 'Mã CB', 'Học vị', 'Chức vụ', 'SĐT', 'Email')
+        widths = (180, 70, 90, 110, 100, 180)
         tf, self.tree = make_tree(frm, cols, heads, widths, height=10, db=self.db, table_id='sec1_gv_pick')
         self.tree.configure(selectmode='extended')
         tf.pack(fill='both', expand=True)

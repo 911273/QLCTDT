@@ -145,6 +145,7 @@ class BaseSection(tb.Frame):
         self.hp_id = None
         self.modified_callback = modified_callback
         self.is_modified = False
+        self._loading = False # Guard to prevent mark_modified during load
         self.configure(padding=0)
         self._ui_built = False
         self._field_registry = {}  # Cho Inline CRUD
@@ -156,22 +157,19 @@ class BaseSection(tb.Frame):
         if not self._ui_built:
             self._build_ui()
             self._ui_built = True
-            
-            # Tự động nạp các trường bổ sung (Inline CRUD)
-            self._render_extra_fields()
-            
-            # Gọi hàm áp dụng giao diện tùy biến (từ DB) sau khi build UI
-            if hasattr(self, 'apply_customization'):
-                try:
-                    self.apply_customization()
-                except Exception as e:
-                    print(f"Lỗi apply_customization: {e}")
 
     def _build_ui(self):
         pass
 
-    def mark_modified(self):
+    def get_abbr(self, key, default=''):
+        """Lấy từ viết tắt từ cấu hình hệ thống."""
+        if not self.db: return default
+        return self.db.get_config(f'abbr_{key.lower()}', default)
+
+    def mark_modified(self, *args):
         """Đánh dấu section đã bị thay đổi dữ liệu."""
+        if self._loading:
+            return
         if not self.is_modified:
             self.is_modified = True
             if self.modified_callback:
@@ -185,15 +183,10 @@ class BaseSection(tb.Frame):
                 self.modified_callback(self, False)
 
     def load(self, hp_id):
+        self._loading = True
         self.ensure_ui()
         self.hp_id = hp_id
-        self.is_modified = False # Reset flag on load
-        
-        # Tự động nạp dữ liệu cho các trường bổ sung
-        if hasattr(self, 'db') and self.db:
-            extra_vals = self.db.load_extra_data(hp_id, self.section_key)
-            if extra_vals:
-                self.load_extra_data_dict(extra_vals)
+        self.reset_modified() # Đảm bảo reset cả callback của MainApp
 
     def save(self):
         pass
@@ -207,55 +200,12 @@ class BaseSection(tb.Frame):
         self.ensure_ui() # FIXED: Ensure UI built before access
 
     def get_extra_data_dict(self) -> dict:
-        """Trích xuất dữ liệu từ các trường bổ sung."""
-        data = {}
-        for fkey, info in self._field_registry.items():
-            if str(fkey).startswith('extra_'):
-                w = info.get('input_widget')
-                if not w: continue
-                import tkinter as tk
-                if isinstance(w, tk.Text):
-                    data[fkey] = w.get('1.0', 'end-1c').strip()
-                elif hasattr(w, 'treeview'): # It's a table wrapper
-                    rows = []
-                    tv = w.treeview
-                    cols = tv.cget('columns')
-                    for item in tv.get_children():
-                        rows.append(dict(zip(cols, tv.item(item, 'values'))))
-                    data[fkey] = rows
-                elif hasattr(w, 'get'):
-                    data[fkey] = w.get()
-        return data
+        """Đã gỡ bỏ tính năng trường bổ sung."""
+        return {}
 
     def load_extra_data_dict(self, data: dict):
-        """Nạp dữ liệu vào các trường bổ sung."""
-        self.ensure_ui()
-        for fkey, val in data.items():
-            info = self._field_registry.get(fkey)
-            if not info: continue
-            w = info.get('input_widget')
-            if not w: continue
-            import tkinter as tk
-            import json
-            if isinstance(w, tk.Text):
-                w.delete('1.0', 'end')
-                w.insert('1.0', str(val))
-            elif hasattr(w, 'treeview'):
-                tv = w.treeview
-                for item in tv.get_children(): tv.delete(item)
-                if isinstance(val, str):
-                    try: val = json.loads(val)
-                    except: val = []
-                if isinstance(val, list):
-                    for row_dict in val:
-                        cols = tv.cget('columns')
-                        vals = [row_dict.get(c, '') for c in cols]
-                        tv.insert('', 'end', values=vals)
-            elif hasattr(w, 'set'):
-                w.set(str(val))
-            elif hasattr(w, 'delete') and hasattr(w, 'insert'):
-                w.delete(0, 'end')
-                w.insert(0, str(val))
+        """Đã gỡ bỏ tính năng trường bổ sung."""
+        pass
 
     def auto_track_vars(self, *vars):
         """Tự động gọi mark_modified khi bất kỳ biến nào thay đổi."""
@@ -292,177 +242,31 @@ class BaseSection(tb.Frame):
     def section_key(self) -> str:
         return type(self).__module__.split('.')[-1]
 
-    def apply_customization(self):
-        """Áp dụng nhãn tùy biến, ẩn/hiện và thứ tự từ DB."""
-        if not hasattr(self, 'db') or not self.db:
-            return
-        meta = self.db.get_field_meta(self.section_key)
-        if not meta:
-            return
-
-        # 1. Thu thập và sắp xếp các trường theo thứ tự (thu_tu)
-        items = []
-        for fkey, info in self._field_registry.items():
-            m = meta.get(fkey, {})
-            order = m.get('thu_tu', 999)
-            items.append((order, fkey, info, m))
+    def extract_codes(self, full_str: str) -> str:
+        """Trích xuất danh sách mã (PLO, PI, CLO...) từ chuỗi mô tả phức tạp."""
+        if not full_str: return ""
+        import re
+        # Pattern tìm các mã có dạng: Chữ in hoa (2+) + Số + (tùy chọn .Số)
+        # Ví dụ: PLO1, PI1.1, CLO10, MT2
+        pattern = r'([A-Z]{2,}\d+(?:\.\d+)*)'
+        codes = re.findall(pattern, full_str)
         
-        # Sắp xếp theo thu_tu
-        items.sort(key=lambda x: x[0])
+        # Loại bỏ trùng lặp và giữ nguyên thứ tự xuất hiện
+        seen = set()
+        unique_codes = []
+        for c in codes:
+            if c not in seen:
+                unique_codes.append(c)
+                seen.add(c)
+        return ", ".join(unique_codes)
 
-        # 2. Áp dụng thay đổi
-        for _, fkey, info, m in items:
-            # Đổi nhãn
-            lbl = info.get('label_widget')
-            if lbl:
-                new_nhan = m.get('nhan_tuy_bien')
-                if new_nhan:
-                    try: lbl.config(text=new_nhan)
-                    except: pass
-                else:
-                    # Reset về nhãn gốc nếu không có tùy biến
-                    orig = getattr(lbl, '_original_text', None)
-                    if orig:
-                        try: lbl.config(text=orig)
-                        except: pass
-
-            # Ẩn/Hiện và Thứ tự
-            frm = info.get('frame')
-            if frm:
-                if m.get('an_truong'):
-                    try:
-                        frm.pack_forget()
-                        frm.grid_remove()
-                    except: pass
-                else:
-                    # Đưa về hiển thị nếu đang bị ẩn (dùng pack mặc định)
-                    try:
-                        if frm.winfo_manager() == '':
-                            frm.pack(side='top', fill='x', pady=2)
-                        elif frm.winfo_manager() == 'pack':
-                            # Re-pack để đảm bảo thứ tự
-                            frm.pack(side='top', fill='x')
-                    except: pass
-
-    def refresh_from_meta(self):
-        """Làm mới toàn bộ giao diện dựa trên cấu hình DB mới nhất."""
-        self._render_extra_fields()
-        self.apply_customization()
+    def apply_customization(self):
+        """Tính năng đã được gỡ bỏ."""
+        pass
 
     def _render_extra_fields(self):
-        """Vẽ các trường dữ liệu bổ sung."""
-        if not hasattr(self, 'db'): return
-        extras = self.db.list_extra_fields(self.section_key)
-        
-        # Dọn dẹp cũ
-        for w in getattr(self, '_extra_widgets', []):
-            try: w.destroy()
-            except: pass
-        self._extra_widgets = []
-        
-        # Xóa các trường extra cũ khỏi registry
-        keys_to_remove = [k for k in self._field_registry.keys() if str(k).startswith('extra_')]
-        for k in keys_to_remove:
-            self._field_registry.pop(k, None)
-        
-        if not extras: 
-            if hasattr(self, '_extra_container'):
-                try: self._extra_container.pack_forget()
-                except: pass
-            return
-            
-        # Xác định container (ưu tiên self._extra_parent nếu có để hỗ trợ ScrollableFrame)
-        parent = getattr(self, '_extra_parent', self)
-        
-        if not hasattr(self, '_extra_container') or not self._extra_container.winfo_exists():
-            self._extra_container = tb.LabelFrame(parent, text='➕ Trường bổ sung')
-            self._extra_container.pack(fill='x', padx=16, pady=8)
-        else:
-            self._extra_container.pack(fill='x', padx=16, pady=8)
-            for w in self._extra_container.winfo_children():
-                try: w.destroy()
-                except: pass
-                
-        for ef in extras:
-            self._render_one_extra(self._extra_container, ef)
-
-    def _render_one_extra(self, parent, ef: dict):
-        row = tb.Frame(parent)
-        row.pack(fill='x', pady=2)
-        lbl = tb.Label(row, text=ef['nhan'] + ('  *' if ef['bat_buoc'] else ''), width=28, anchor='w')
-        lbl.pack(side='left')
-        
-        var = tk.StringVar(value=ef.get('gia_tri_mac_dinh',''))
-        kieu = ef.get('kieu','text')
-        
-        if kieu == 'textarea':
-            w = tk.Text(row, height=3, width=40)
-            w.insert('1.0', var.get())
-            w.pack(side='left', fill='x', expand=True)
-        elif kieu == 'dropdown':
-            import json
-            try: opts = json.loads(ef.get('options_json','[]'))
-            except: opts = []
-            w = tb.Combobox(row, textvariable=var, values=opts, state='readonly')
-            w.pack(side='left', fill='x', expand=True)
-        elif kieu == 'table':
-            import json
-            try: cols = json.loads(ef.get('options_json','[]'))
-            except: cols = []
-            if not cols: cols = ['Cột 1', 'Cột 2']
-            
-            # Wrapper frame for the table so we can attach it to _field_registry
-            w = tb.Frame(row)
-            w.pack(side='left', fill='both', expand=True)
-            
-            # Treeview sử dụng hàm chuẩn của hệ thống để hỗ trợ căn lề
-            table_id = f"ext_{ef['field_key']}"
-            tfrm, tv = make_tree(w, columns=cols, headings=cols, height=4, db=self.db, table_id=table_id)
-            tfrm.pack(side='left', fill='both', expand=True)
-            
-            # Nút chức năng
-            btn_frm = tb.Frame(w)
-            btn_frm.pack(side='left', fill='y', padx=4)
-            
-            def _add_row():
-                top = tk.Toplevel(w)
-                top.title("Nhập dữ liệu dòng mới")
-                top.geometry("350x300")
-                top.transient(w.winfo_toplevel())
-                top.grab_set()
-                
-                entries = []
-                for c in cols:
-                    f = tb.Frame(top)
-                    f.pack(fill='x', padx=10, pady=4)
-                    tb.Label(f, text=c, width=15).pack(side='left')
-                    e = tb.Entry(f)
-                    e.pack(side='left', fill='x', expand=True)
-                    entries.append(e)
-                    
-                def _save_row():
-                    vals = [e.get() for e in entries]
-                    tv.insert('', 'end', values=vals)
-                    top.destroy()
-                    
-                tb.Button(top, text="Thêm dòng", command=_save_row, bootstyle='success').pack(pady=10)
-                if entries: entries[0].focus()
-                
-            def _del_row():
-                for item in tv.selection():
-                    tv.delete(item)
-                    
-            tb.Button(btn_frm, text='+', width=3, command=_add_row, bootstyle='success').pack(pady=2)
-            tb.Button(btn_frm, text='-', width=3, command=_del_row, bootstyle='danger').pack(pady=2)
-            
-            # Save a reference to the treeview inside the wrapper for data extraction later
-            w.treeview = tv
-        else:
-            w = tb.Entry(row, textvariable=var)
-            w.pack(side='left', fill='x', expand=True)
-            
-        self._extra_widgets.append(row)
-        self._register_field(ef['field_key'], label_widget=lbl, input_widget=w, frame=row)
+        """Tính năng đã được gỡ bỏ."""
+        pass
 
 # ─── Helpers cho widget ───────────────────────────────────────────────────────
 def lbl(parent, text, bold=False, fg=None, size=10, style=None):
@@ -720,6 +524,23 @@ class RowEditDialog(tb.Toplevel):
                 tb.Button(f, text='...', width=3, command=_open_picker).pack(side='right', padx=(4,0))
                 self._vars[key] = var
                 self.entries[key] = e
+            elif wtype == 'cdr_picker':
+                var = tk.StringVar(value=str(initial.get(key, '')))
+                f = tb.Frame(frm)
+                f.grid(row=r, column=1, sticky='ew', **pad)
+                e = tb.Entry(f, textvariable=var, width=35, font=('Arial', 10), state='readonly')
+                e.pack(side='left', fill='x', expand=True)
+                
+                def _open_cdr_picker(v=var, ops=opts):
+                    db = ops.get('db')
+                    hp_id = ops.get('hp_id')
+                    dlg = CDRMultiSelectDialog(self, db, hp_id, initial=v.get())
+                    if dlg.result is not None:
+                        v.set(", ".join(dlg.result))
+                
+                tb.Button(f, text='...', width=3, command=_open_cdr_picker).pack(side='right', padx=(4,0))
+                self._vars[key] = var
+                self.entries[key] = e
             elif wtype == 'entry_with_btn':
                 row_frm = tb.Frame(frm)
                 row_frm.grid(row=r, column=1, sticky='ew', **pad)
@@ -759,10 +580,8 @@ class RowEditDialog(tb.Toplevel):
         self.destroy()
 
     def _handle_btn_cmd(self, key, var):
-        # Tự động gọi hàm _<key> trên master nếu tồn tại
         method_name = f"_{key}"
         if hasattr(self.master, method_name):
-            # Pass cả var và dialog (self) để có thể update nhiều field
             getattr(self.master, method_name)(var, dialog=self)
 
 
@@ -812,11 +631,10 @@ class MultiSelectDialog(tb.Toplevel):
         # Action bar
         bf = tb.Frame(self, padding=8)
         bf.pack(fill='x')
-        tb.Button(bf, text="Chọn tất cả", command=self._select_all).pack(side='left', padx=4)
-        tb.Button(bf, text="Bỏ chọn hết", command=self._deselect_all).pack(side='left', padx=4)
-        
-        tb.Button(bf, text="✔ OK", command=self._ok).pack(side='right', padx=4)
-        tb.Button(bf, text="Hủy", command=self.destroy).pack(side='right', padx=4)
+        tb.Button(bf, text='Chọn tất cả', command=self._select_all, bootstyle='outline-info').pack(side='left', padx=4)
+        tb.Button(bf, text='Bỏ chọn hết', command=self._deselect_all, bootstyle='outline-secondary').pack(side='left', padx=4)
+        tb.Button(bf, text='✔ OK', command=self._ok, width=10).pack(side='right', padx=4)
+        tb.Button(bf, text='✘ Hủy', command=self.destroy, bootstyle='outline-danger').pack(side='right', padx=4)
 
     def _refresh_list(self):
         # Clear inner frame
@@ -843,6 +661,152 @@ class MultiSelectDialog(tb.Toplevel):
 
     def _ok(self):
         self.result = [opt for opt in self.options_list if self._checked_vars[opt].get()]
+        self.destroy()
+
+# ─── Specialized CDR MultiSelect (Treeview) ──────────────────────────────────
+class CDRMultiSelectDialog(tb.Toplevel):
+    """Dialog chọn PLO/PI sử dụng Treeview phân cấp có checkbox."""
+    def __init__(self, parent, db, hp_id, initial=''):
+        super().__init__(parent)
+        set_window_icon(self)
+        self.title("Chọn Chuẩn đầu ra CTĐT (PLO/PI)")
+        self.geometry('850x650')
+        self.db = db
+        self.hp_id = hp_id
+        self.grab_set()
+        self.result = None
+        
+        # State: mã -> boolean
+        self._checked = {}
+        init_codes = [c.strip() for c in initial.split(',') if c.strip()]
+        # Nếu initial chứa "PLO1: Mô tả", ta chỉ lấy "PLO1"
+        self._init_mas = [c.split(':')[0].strip() for c in init_codes]
+        
+        self._build()
+        self.load_data()
+        self.transient(parent)
+        self.wait_window()
+
+    def _build(self):
+        self.configure(background=CLR_BG)
+        frm = tb.Frame(self, padding=12)
+        frm.pack(fill='both', expand=True)
+
+        # Treeview
+        cols = ('status', 'ma', 'mo_ta')
+        heads = ('Chọn', 'Mã', 'Nội dung')
+        widths = (60, 100, 600)
+        
+        self.tree_frm, self.tree = make_tree(frm, cols, heads, widths, height=20, show='tree headings')
+        self.tree_frm.pack(fill='both', expand=True)
+        
+        self.tree.column('#0', width=40, minwidth=40, stretch=False)
+        self.tree.heading('#0', text='')
+        
+        # Đồng bộ màu sắc theo theme
+        self.tree.tag_configure('plo', background=CLR_HDR, foreground='white', font=('Arial', 10, 'bold'))
+        self.tree.tag_configure('pi_even', background=CLR_ROW1, foreground=CLR_TEXT)
+        self.tree.tag_configure('pi_odd',  background=CLR_ROW2, foreground=CLR_TEXT)
+        
+        # Bindings for checkbox simulation
+        self.tree.bind('<Button-1>', self._on_click)
+        self.tree.bind('<space>', self._on_space)
+
+        # Buttons
+        bf = tb.Frame(self, padding=10)
+        bf.pack(fill='x')
+        tb.Button(bf, text='Chọn tất cả', command=self._select_all, bootstyle='outline-info').pack(side='left', padx=4)
+        tb.Button(bf, text='Bỏ chọn hết', command=self._deselect_all, bootstyle='outline-secondary').pack(side='left', padx=4)
+        
+        tb.Button(bf, text='✔ Xác nhận', command=self._ok, width=12).pack(side='right', padx=4)
+        tb.Button(bf, text='✘ Hủy', command=self.destroy, bootstyle='outline-danger').pack(side='right', padx=4)
+
+    def load_data(self):
+        if not self.hp_id: return
+        from utils.data_utils import natural_sort_key
+        links = self.db.get_ctdt_of_hp(self.hp_id)
+        
+        seen_plo = set()
+        seen_pi = set()
+        pi_count = 0
+
+        for l in links:
+            cid = l['ctdt_id']
+            plos = self.db.get_plo_by_ctdt(cid)
+            plos.sort(key=lambda x: natural_sort_key(x['ma']))
+            
+            for plo in plos:
+                if plo['ma'] in seen_plo: continue
+                seen_plo.add(plo['ma'])
+                
+                plo_iid = f"plo_{plo['id']}"
+                status = "☑" if plo['ma'] in self._init_mas else "☐"
+                self._checked[plo_iid] = (plo['ma'] in self._init_mas)
+                
+                self.tree.insert('', 'end', iid=plo_iid, 
+                                 values=(status, plo['ma'], plo['mo_ta']),
+                                 tags=('plo',), open=True)
+                
+                pis = self.db.get_pi_by_plo(plo['id'])
+                pis.sort(key=lambda x: natural_sort_key(x['ma']))
+                for pi in pis:
+                    if pi['ma'] in seen_pi: continue
+                    seen_pi.add(pi['ma'])
+                    
+                    pi_iid = f"pi_{pi['id']}"
+                    status = "☑" if pi['ma'] in self._init_mas else "☐"
+                    self._checked[pi_iid] = (pi['ma'] in self._init_mas)
+                    
+                    tag = 'pi_even' if pi_count % 2 == 0 else 'pi_odd'
+                    self.tree.insert(plo_iid, 'end', iid=pi_iid,
+                                     values=(status, pi['ma'], pi['mo_ta']),
+                                     tags=(tag,))
+                    pi_count += 1
+
+    def _on_click(self, event):
+        region = self.tree.identify_region(event.x, event.y)
+        if region == 'cell':
+            column = self.tree.identify_column(event.x)
+            if column == '#1': # Cột 'Chọn'
+                iid = self.tree.identify_row(event.y)
+                if iid: self._toggle(iid)
+
+    def _on_space(self, event):
+        sel = self.tree.selection()
+        if sel: self._toggle(sel[0])
+
+    def _toggle(self, iid):
+        curr = self._checked.get(iid, False)
+        new_val = not curr
+        self._checked[iid] = new_val
+        
+        # Update UI
+        vals = list(self.tree.item(iid, 'values'))
+        vals[0] = "☑" if new_val else "☐"
+        self.tree.item(iid, values=vals)
+
+    def _select_all(self):
+        for iid in self._checked:
+            self._checked[iid] = True
+            vals = list(self.tree.item(iid, 'values'))
+            vals[0] = "☑"
+            self.tree.item(iid, values=vals)
+
+    def _deselect_all(self):
+        for iid in self._checked:
+            self._checked[iid] = False
+            vals = list(self.tree.item(iid, 'values'))
+            vals[0] = "☐"
+            self.tree.item(iid, values=vals)
+
+    def _ok(self):
+        # Kết quả là danh sách chuỗi "Mã: Mô tả"
+        res = []
+        for iid, is_ok in self._checked.items():
+            if is_ok:
+                vals = self.tree.item(iid, 'values')
+                res.append(f"{vals[1]}: {vals[2]}")
+        self.result = res
         self.destroy()
 
 def enable_inline_edit(tree, editable_cols, on_change_cb=None):

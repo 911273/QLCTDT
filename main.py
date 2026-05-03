@@ -17,10 +17,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from db import Database
 from shared_data_dialog import SharedDataDialog
-import word_export
 import word_import
+from template_manager_dialog import TemplateManagerDialog
 from statistics_dialog import StatisticsDialog
 from settings_dialog import SettingsDialog
+from version_history_dialog import VersionHistoryDialog
 from datetime import datetime
 import json
 from utils.threading_utils import run_threaded_task
@@ -30,13 +31,7 @@ from utils.ui_utils import (show_modern_info, show_modern_warning,
 # New Architectural Layers
 from core.container import get_container, init_container
 from sections.registry import SectionRegistry, auto_register_all_sections
-from sections.dynamic_section import DynamicSection
-from section_manager_dialog import SectionManagerDialog
-import db
-from template_manager_dialog import TemplateManagerDialog
-from version_history_dialog import VersionHistoryDialog
-from import_preview_dialog import ImportPreviewDialog
-from modules.de_cuong.ui.system_menu.schema_manager_panel import SchemaManagerDialog
+
 
 from controllers.main_controller import MainController
 from controllers.tree_controller import TreeController
@@ -63,7 +58,7 @@ from sections.base_section import setup_treeview_style, apply_theme, THEMES, set
 
 
 APP_TITLE = 'APM System - Quản lý Đề cương Chi tiết Học phần | EPU'
-VERSION   = '1.4.5'  # FIXED N-01: Sync với tên thư mục
+VERSION   = '1.5.0'  # Nâng cấp logic trích xuất mã và sửa lỗi lưu trữ Tab 5
 
 # Các biến màu sắc chuyển sang base_section để dùng chung
 
@@ -250,27 +245,20 @@ class QLCTDTApp:
         mexport.add_command(label='📚 Xuất hàng loạt (built-in)',command=lambda: self.export_bulk('builtin'))
         mexport.add_command(label='📚 Xuất hàng loạt (template)',command=lambda: self.export_bulk('template'))
 
-        # Dữ liệu chung
-        mdata = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label='Dữ liệu Chung', menu=mdata)
-        mdata.add_command(label='👤 Giảng viên / Khoa / CDR',
-                          command=self.open_shared_data)
-
-        # Template
-        mtpl = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label='Template', menu=mtpl)
-        mtpl.add_command(label='📋 Quản lý Template Word', command=self.open_template_manager)
-
         # Thống kê
         mstats = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label='Thống kê', menu=mstats)
         mstats.add_command(label='📊 Thống kê & Báo cáo', command=self.open_statistics)
+        mstats.add_command(label='📜 Lịch sử phiên bản', command=self.open_version_history)
+        mstats.add_command(label='🔍 Đối soát dữ liệu', command=self.run_full_audit)
+        mstats.add_separator()
+        mstats.add_command(label='👤 Giảng viên / Khoa / CDR', command=self.open_shared_data)
 
         # Hệ thống
         msys = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label='Hệ thống', menu=msys)
-        msys.add_command(label='📐 Mẫu đề cương', command=self.open_schema_manager)
-        msys.add_command(label='📂 Quản lý Mục đề cương', command=self.open_section_manager)
+        msys.add_command(label='📋 Quản lý Template Word', command=self.open_template_manager)
+        msys.add_separator()
         msys.add_command(label='⚙️ Thiết lập hệ thống', command=self.open_settings)
         msys.add_separator()
         msys.add_command(label='🛠 Tùy biến UI (Inline CRUD)', command=self._toggle_inline_crud)
@@ -295,80 +283,38 @@ class QLCTDTApp:
             
         from sections.base_section import CURRENT_THEME
         
-        # Header phong cách QBMSys (Title + Theme selector)
+        # Header: Gồm tìm kiếm (trái) và tiến độ/giao diện (phải)
         header_frm = tb.Frame(self.root)
-        header_frm.pack(side='top', fill='x', padx=10, pady=(10, 0))
-        tb.Label(header_frm, text="APM System", font=('Arial', 14, 'bold')).pack(side='left')
+        header_frm.pack(side='top', fill='x', padx=15, pady=(10, 5))
 
-        # Nút đổi màu ở bên phải Header
-        theme_icon = '☀️' if CURRENT_THEME == 'dark' else '🌙'
-        self.btn_theme = tb.Button(header_frm, text=f"{theme_icon} Giao diện", 
-                                     bootstyle='link', command=self.toggle_theme)
-        self.btn_theme.pack(side='right')
-
-        tb_frame = tb.Frame(self.root, padding=(6, 4))
-        tb_frame.pack(side='top', fill='x', padx=10)
-        self.tb = tb_frame
-
-        btn_data = [
-            ('💾 Lưu',           self.save_hp,              'success'),
-            (None, None, None), 
-            ('📥 Import',        self.import_word_single,   'outline-info'),
-            ('📥 Import Folder', self.import_word_batch,    'outline-info'),
-            (None, None, None),
-            ('📤 Xuất Word',     self.export_word_builtin,  'outline-info'),
-            ('📚 Xuất nhiều',    lambda: self.export_bulk('builtin'), 'outline-info'),
-            (None, None, None),
-            ('👥 Dữ liệu Chung', self.open_shared_data,     'outline-secondary'),
-            ('📊 Thống kê',      self.open_statistics,       'outline-warning'),
-            ('📜 Lịch sử',      self.open_version_history,  'outline-info'),
-            ('🔍 Đối soát',      self.run_full_audit,        'outline-danger'),
-        ]
-        for item in btn_data:
-            text, cmd, bstyle = item
-            if text is None:
-                tb.Separator(tb_frame, orient='vertical').pack(side='left', padx=6, pady=2, fill='y')
-            else:
-                tb.Button(tb_frame, text=text, command=cmd, bootstyle=bstyle).pack(side='left', padx=2)
-
-        # Right: Search
-        tb.Label(tb_frame, text='🔍', font=('Arial', 12)).pack(side='right', padx=(0, 2))
+        # 🔍 Tìm kiếm (Bên trái)
+        search_frm = tb.Frame(header_frm)
+        search_frm.pack(side='left', fill='y')
+        tb.Label(search_frm, text='🔍', font=('Arial', 12)).pack(side='left', padx=(0, 5))
         self.v_search = tk.StringVar()
         self.v_search.trace_add('write', self._on_search_change)
-        tb.Entry(tb_frame, textvariable=self.v_search, width=22).pack(side='right', padx=4)
-        tb.Label(tb_frame, text='Tìm học phần:').pack(side='right')
+        tb.Entry(search_frm, textvariable=self.v_search, width=30).pack(side='left')
+        tb.Label(search_frm, text='Tìm học phần:', font=('Arial', 9)).pack(side='left', padx=5)
 
-        # Overall Progress Bar
+        # 🌓 Nút đổi giao diện (Bên phải nhất)
+        theme_icon = '☀️' if CURRENT_THEME == 'dark' else '🌙'
+        self.btn_theme = tb.Button(header_frm, text=f"{theme_icon}", 
+                                     bootstyle='link', command=self.toggle_theme)
+        self.btn_theme.pack(side='right', padx=(10, 0))
+
+        # 📊 Thanh tiến độ (Bên phải)
         prog_frm = tb.Frame(header_frm)
-        prog_frm.pack(side='right', padx=8)
+        prog_frm.pack(side='right', padx=10)
         self.lbl_percent = tb.Label(prog_frm, text='Hoàn thành: 0%',
                                      font=('Arial', 9), bootstyle='muted')
         self.lbl_percent.pack(side='top', anchor='e')
-        self.progress_bar = tb.Progressbar(prog_frm, length=120,
+        self.progress_bar = tb.Progressbar(prog_frm, length=150,
                                             bootstyle='success-striped', maximum=100)
         self.progress_bar.pack(side='top')
 
     def _toggle_inline_crud(self):
-        """Bật/tắt chế độ Inline CRUD cho tab hiện tại."""
-        if hasattr(self, '_overlay_window') and self._overlay_window:
-            if getattr(self._overlay_window, '_active', False):
-                self._overlay_window.deactivate()
-                self._overlay_window = None
-                return
-            
-        from sections.inline_crud_overlay import InlineCRUDOverlay
-        
-        # Chỉ áp dụng overlay cho tab hiện tại đang mở trong Notebook
-        try:
-            current_tab_idx = self.nb.index("current")
-            if 0 <= current_tab_idx < len(self._sections):
-                current_section = self._sections[current_tab_idx]
-                self._overlay_window = InlineCRUDOverlay(current_section, self.db)
-                self._overlay_window.activate()
-            else:
-                self.show_warning("Chú ý", "Không tìm thấy giao diện tab hiện tại.")
-        except Exception as e:
-            self.show_warning("Chú ý", f"Không thể bật Tùy biến: {e}")
+        """Tính năng đã được gỡ bỏ."""
+        pass
 
     # ── Body ─────────────────────────────────────────────────────────────────
     def _build_body(self):
@@ -467,19 +413,7 @@ class QLCTDTApp:
             except Exception as e:
                 print(f"[Main] Error loading section {label}: {e}")
 
-        # 2. Các Mục động từ Database
-        dynamic_list = self.db.list_sections()
-        for ds in dynamic_list:
-            try:
-                sec = DynamicSection(self.nb, self.db, 
-                                     section_key=ds['section_key'], 
-                                     label=ds['label'],
-                                     lazy=True, 
-                                     modified_callback=_on_modified)
-                self.nb.add(sec, text=ds['label'])
-                self._sections.append(sec)
-            except Exception as e:
-                print(f"[Main] Error loading dynamic section {ds['label']}: {e}")
+
 
         # Config Tab Badge (Phase 4: Sử dụng Class Name để mapping linh hoạt)
         self._TAB_CONFIG = {
@@ -643,6 +577,15 @@ class QLCTDTApp:
         iid = sel[0]
         
         # 1. Xử lý logic thay đổi dữ liệu
+        # Double-check: Kiểm tra thực tế từ tất cả các section để tránh cờ hiệu bị sai lệch
+        real_modified = any(getattr(s, 'is_modified', False) for s in self._sections)
+        if real_modified != self._modified:
+            self._modified = real_modified
+            if not real_modified:
+                # Nếu thực tế không thay đổi, cập nhật lại UI và bỏ qua thông báo
+                self._set_status('Sẵn sàng')
+                self.root.title(f"{self.db.get_hoc_phan(self.current_hp_id)['ten_viet'] if self.current_hp_id else ''} — {APP_TITLE}")
+        
         if self._modified:
             # Chỉ hỏi nếu thực sự chuyển sang đối tượng khác
             # (Ở đây ta tạm đơn giản hóa là luôn hỏi nếu có thay đổi)
@@ -652,24 +595,61 @@ class QLCTDTApp:
                 return
             if ans:
                 self.save_hp()
-            self._modified = False # Reset sau khi đã hỏi/lưu
+            else:
+                # Nếu chọn 'No' (Không lưu), ta vẫn phải reset trạng thái của các section
+                # để lần chuyển sau không hỏi lại dữ liệu cũ đó nữa.
+                for sec in self._sections:
+                    if hasattr(sec, 'reset_modified'):
+                        sec.reset_modified()
+                self._modified = False
 
-        # 2. Kiểm tra nếu là node group hoặc CTĐT
-        if iid not in self._hp_id_map:
-            if iid.startswith('lazy_ctdt_'):
-                try:
-                    ctdt_id = int(iid.split('_')[2])
-                    self.current_hp_id = None # Thoát khỏi ngữ cảnh HP
-                    self.show_program_info(ctdt_id)
+        # 2. Kiểm tra loại node dựa trên tags
+        tags = self.hp_tree.item(iid, 'tags')
+        
+        if 'hp' not in tags:
+            # Đây là một node thư mục (Bậc, CTĐT, Khối, Chuyên ngành, hoặc Chưa phân lớp)
+            self.current_hp_id = None
+            
+            # Trích xuất ctdt_id từ iid (Format: lazy_type_id_...)
+            parts = iid.split('_')
+            ctdt_id = None
+            if len(parts) >= 3 and parts[1] in ('ctdt', 'khoi', 'cn'):
+                try: ctdt_id = int(parts[2])
                 except: pass
-            return  # group node
+            
+            # Thực hiện hiển thị
+            if hasattr(self, 'sec_program'):
+                # 1. Luôn ưu tiên chuyển sang tab 0
+                try: self.nb.select(0)
+                except: pass
+                
+                # 2. Tải dữ liệu nếu tìm thấy ctdt_id
+                if ctdt_id:
+                    self.show_program_info(ctdt_id)
+                else:
+                    # Nếu là các node không gắn với CTĐT (như Bậc, Chưa phân lớp)
+                    self.sec_program.clear_ui()
+                    self.root.title(APP_TITLE)
+                    self._set_status("Chọn một chương trình đào tạo để xem chi tiết")
+            
+            return  # Kết thúc xử lý cho node group
 
-        hp_id = self._hp_id_map[iid]
+        # 3. Xử lý khi chọn Học phần
+        hp_id = self._hp_id_map.get(iid)
+        if not hp_id: return
+        
         if hp_id == self.current_hp_id:
+            # Nếu đang xem học phần này rồi, giữ nguyên trạng thái tab hiện tại
             return
             
         self.current_hp_id = hp_id
         self._load_all_sections(hp_id)
+        
+        # Tự động chuyển về tab "1. Thông tin" khi chọn học phần mới
+        if hasattr(self, 'sec1'):
+            try: self.nb.select(self.nb.index(self.sec1))
+            except: self.nb.select(1)
+            
         hp = self.db.get_hoc_phan(hp_id)
         name = hp['ten_viet'] if hp else f'HP #{hp_id}'
         self.root.title(f'{name} — {APP_TITLE}')
@@ -679,14 +659,17 @@ class QLCTDTApp:
     def show_program_info(self, ctdt_id):
         """Hiển thị thông tin tổng quan của Chương trình đào tạo."""
         if hasattr(self, 'sec_program'):
-            # Chuyển sang tab đầu tiên (Thông tin CTĐT)
-            for i, sec in enumerate(self._sections):
-                if sec == self.sec_program:
-                    self.nb.select(i)
-                else:
-                    # Xóa trắng dữ liệu các tab học phần khi đang xem CTĐT
-                    if hasattr(sec, 'clear'):
-                        sec.clear()
+            # Chuyển sang tab "0. Thông tin CTĐT" (Thường là tab đầu tiên)
+            try:
+                target_idx = self.nb.index(self.sec_program)
+                self.nb.select(target_idx)
+            except:
+                self.nb.select(0)
+            
+            # Xóa trắng dữ liệu các tab học phần khác (Chỉ xóa nếu tab đó đã được build UI)
+            for sec in self._sections:
+                if sec != self.sec_program and hasattr(sec, 'clear') and getattr(sec, '_ui_built', False):
+                    sec.clear()
             
             self.sec_program.load_ctdt(ctdt_id)
             
@@ -699,7 +682,9 @@ class QLCTDTApp:
 
     def _on_hp_double_click(self, e):
         self._on_hp_select()
-        self.nb.select(0)
+        if hasattr(self, 'sec1'):
+            try: self.nb.select(self.nb.index(self.sec1))
+            except: self.nb.select(1)
 
     def clone_hp(self):
         new_id = self.controller.clone_hp(self.current_hp_id)
@@ -800,9 +785,9 @@ class QLCTDTApp:
         try:
             results = run_threaded_task(
                 self.root,
-                word_export.export_batch,
+                self.ie_service.export_batch,
                 title=f"Đang xuất {len(hp_ids)} học phần...",
-                args=(self.db, hp_ids, dir_path, template_path)
+                args=(hp_ids, dir_path, template_path)
             )
 
             msg = f"Thành công: {results['success']}\nLỗi: {results['errors']}"
@@ -823,11 +808,35 @@ class QLCTDTApp:
         # 1. Thu thập dữ liệu từ các section đã được load
         full_data = {}      # For validation
         modified_data = {}  # For actual DB save
+
+        # Mapping ổn định cho service (đảm bảo không bị lệch index khi thêm tab mới)
+        service_map = {
+            'Sec1ThongTin': 'sec1',
+            'Sec2MoTa': 'sec2',
+            'Sec3MucTieu': 'sec3',
+            'Sec4Clo': 'sec4',
+            'Sec5HocLieu': 'sec5',
+            'Sec5CoSoVatChat': 'sec5',
+            'Sec6NoiDung': 'sec6',
+            'Sec7PpDay': 'sec7',
+            'Sec8KiemTra': 'sec8',
+            'Sec9QuyDinh': 'sec9_quy_dinh',
+            'Sec13CapNhat': 'sec9'  # Cập nhật/Ký tên tương ứng với mục 9 trong DB cũ
+        }
+
         for i, sec in enumerate(self._sections):
             if hasattr(sec, 'get_data_dict') and sec.hp_id == self.current_hp_id:
                 try:
+                    cname = sec.__class__.__name__
+                    # Bỏ qua các tab thông tin chỉ đọc (như SecProgramInfo)
+                    if cname == 'SecProgramInfo':
+                        continue
+
                     d = sec.get_data_dict()
-                    full_data[f'sec{i+1}'] = d
+                    # Dùng key ổn định từ mapping
+                    s_key = service_map.get(cname, f'sec{i+1}')
+                    
+                    full_data[s_key] = d
                     
                     # Tự động lưu dữ liệu các trường bổ sung (Inline CRUD)
                     extra_d = sec.get_extra_data_dict()
@@ -835,7 +844,7 @@ class QLCTDTApp:
                          self.db.save_extra_data(self.current_hp_id, sec.section_key, extra_d)
 
                     if getattr(sec, 'is_modified', False):
-                        modified_data[f'sec{i+1}'] = d
+                        modified_data[s_key] = d
                 except Exception as ex:
                     print(f'[WARN] {sec.__class__.__name__}.get_data_dict: {ex}')
 
@@ -1023,21 +1032,7 @@ class QLCTDTApp:
     def open_statistics(self):
         StatisticsDialog(self.root, self.db)
 
-    def open_schema_manager(self):
-        dlg = SchemaManagerDialog(self.root, self.db)
-        self.root.wait_window(dlg)
-        self.load_hp_list()
 
-    def open_section_manager(self):
-        """Mở cửa sổ quản lý các Mục đề cương bổ sung."""
-        dlg = SectionManagerDialog(self.root, self.db)
-        self.root.wait_window(dlg)
-        if dlg.result_changed:
-            if ask_modern_yesno(self.root, "Khởi động lại", "Danh sách các Mục đã thay đổi. Bạn có muốn khởi động lại ứng dụng để áp dụng thay đổi ngay bây giờ không?"):
-                import sys
-                import os
-                python = sys.executable
-                os.execl(python, python, *sys.argv)
 
     def open_settings(self):
         dlg = SettingsDialog(self.root, self.db)
@@ -1063,6 +1058,41 @@ class QLCTDTApp:
 
     def open_template_manager(self):
         TemplateManagerDialog(self.root, self.db)
+
+    def refresh_ui(self):
+        """Cập nhật lại toàn bộ nhãn giao diện dựa trên cấu hình mới nhất."""
+        # 1. Lấy cấu hình từ viết tắt mới
+        abbr_mt = self.db.get_config('abbr_mt', 'MT')
+        abbr_clo = self.db.get_config('abbr_clo', 'CLO')
+        
+        # 2. Cập nhật TAB_CONFIG để update_tab_badges() dùng đúng nhãn mới
+        if hasattr(self, '_TAB_CONFIG'):
+            if 'Sec3MucTieu' in self._TAB_CONFIG:
+                cfg = list(self._TAB_CONFIG['Sec3MucTieu'])
+                cfg[0] = f'3. Mục tiêu ({abbr_mt})'
+                self._TAB_CONFIG['Sec3MucTieu'] = tuple(cfg)
+            if 'Sec4Clo' in self._TAB_CONFIG:
+                cfg = list(self._TAB_CONFIG['Sec4Clo'])
+                cfg[0] = f'4. {abbr_clo}'
+                self._TAB_CONFIG['Sec4Clo'] = tuple(cfg)
+
+        # 3. Duyệt qua các section để cập nhật nhãn tab và nội dung bên trong
+        for i, sec in enumerate(self._sections):
+            cls_name = sec.__class__.__name__
+            
+            # Cập nhật nhãn tab trong Notebook
+            if cls_name == 'Sec3MucTieu':
+                self.nb.tab(i, text=f'3. Mục tiêu ({abbr_mt})')
+            elif cls_name == 'Sec4Clo':
+                self.nb.tab(i, text=f'4. {abbr_clo}')
+                
+            # Gọi hàm refresh nội bộ của từng section nếu có
+            if hasattr(sec, 'refresh_labels'):
+                sec.refresh_labels()
+        
+        # 4. Cập nhật lại các Badge (✅) trên tab
+        self.update_tab_badges()
+        print("[MainApp] UI labels refreshed.")
 
     def open_version_history(self):
         if not self.current_hp_id:
@@ -1102,14 +1132,12 @@ class QLCTDTApp:
             "   - Cột 4: Số tín chỉ (Số)\n"
             "   - Cột 5: Tên Khoa quản lý (Phải khớp chính xác với tên trong danh mục Khoa)\n\n"
             "3. Tab GIẢNG VIÊN:\n"
-            "   - Cột 1: Họ và tên (Bắt buộc)\n"
-            "   - Cột 2: Ngày sinh (dd/mm/yyyy)\n"
-            "   - Cột 3: Học vị\n"
-            "   - Cột 4: Chức danh\n"
-            "   - Cột 5: Tên Đơn vị/Khoa\n"
-            "   - Cột 6: Email\n"
-            "   - Cột 7: Số điện thoại\n"
-            "   - Cột 8: Số CMND/CCCD\n\n"
+            "   - Gồm 20 cột dữ liệu theo thứ tự:\n"
+            "     1. Mã cán bộ, 2. Họ và tên (Bắt buộc), 3. Giới tính, 4. Ngày sinh (dd/mm/yyyy),\n"
+            "     5. Học vị, 6. Chức danh, 7. Chức vụ, 8. Tên Đơn vị/Khoa, 9. Email,\n"
+            "     10. Số điện thoại, 11. Số CMND/CCCD, 12. Địa chỉ, 13. Năm phong chức danh,\n"
+            "     14. Trình độ chuyên môn, 15. Cơ sở đào tạo, 16. Năm tốt nghiệp,\n"
+            "     17. Ngành đào tạo, 18. Ngày tuyển dụng, 19. Mã số bảo hiểm, 20. Kinh nghiệm (năm)\n\n"
             "4. Tab THƯ VIỆN HỌC LIỆU:\n"
             "   - Cột 1: Tên giáo trình/sách (Bắt buộc)\n"
             "   - Cột 2: Tác giả\n"

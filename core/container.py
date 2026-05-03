@@ -34,6 +34,17 @@ class AppContainer:
         self._events = None
         self._validation_svc = None
         self._deccuong_svc = None
+        
+        # Repositories
+        self._hp_repo = None
+        self._khoa_repo = None
+        self._gv_repo = None
+        self._clo_repo = None
+        self._tailieu_repo = None
+        self._noidung_repo = None
+        self._rubric_repo = None
+        self._baidanhgia_repo = None
+
 
     # ── Data Layer ────────────────────────────────────────────────────────────
 
@@ -111,6 +122,58 @@ class AppContainer:
             self._deccuong_svc = DeCuongService(self.db)
         return self._deccuong_svc
 
+    # ── Repositories ──────────────────────────────────────────────────────────
+
+    @property
+    def hp_repo(self):
+        if self._hp_repo is None:
+            from repositories.hoc_phan_repository import HocPhanRepository
+            self._hp_repo = HocPhanRepository(self.db)
+        return self._hp_repo
+
+    @property
+    def khoa_repo(self):
+        if self._khoa_repo is None:
+            from repositories.khoa_repository import KhoaRepository
+            self._khoa_repo = KhoaRepository(self.db)
+        return self._khoa_repo
+
+    @property
+    def gv_repo(self):
+        if self._gv_repo is None:
+            from repositories.giang_vien_repository import GiangVienRepository
+            self._gv_repo = GiangVienRepository(self.db)
+        return self._gv_repo
+
+    @property
+    def clo_repo(self):
+        if self._clo_repo is None:
+            from repositories.clo_repository import CLORepository
+            self._clo_repo = CLORepository(self.db)
+        return self._clo_repo
+
+    @property
+    def tailieu_repo(self):
+        if self._tailieu_repo is None:
+            from repositories.tailieu_repository import TaiLieuRepository
+            self._tailieu_repo = TaiLieuRepository(self.db)
+        return self._tailieu_repo
+
+    @property
+    def noidung_repo(self):
+        if self._noidung_repo is None:
+            from repositories.noidung_repository import NoiDungRepository
+            self._noidung_repo = NoiDungRepository(self.db)
+        return self._noidung_repo
+
+    @property
+    def rubric_repo(self):
+        if self._rubric_repo is None:
+            from repositories.rubric_repository import RubricRepository
+            self._rubric_repo = RubricRepository(self.db)
+        return self._rubric_repo
+
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def shutdown(self):
@@ -133,7 +196,11 @@ class AppContainer:
         _ = self.db
         _ = self.cache
         _ = self.worker_pool
+        # Pre-warm essential repos
+        _ = self.hp_repo
+        _ = self.khoa_repo
         print("[AppContainer] Warm-up done.")
+
 
 
 # Singleton toàn app

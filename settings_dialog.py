@@ -25,6 +25,12 @@ class SettingsDialog(tb.Toplevel):
             ('hp_natures', 'Danh sách tính chất học phần (Nature):'),
             ('hp_types',   'Danh sách loại học phần (Bắt buộc/Tự chọn):'),
             ('trinh_do',   'Danh sách trình độ đào tạo:'),
+            ('sep1',       '--- Cấu hình Từ viết tắt ---'),
+            ('abbr_po',    'Viết tắt Mục tiêu CTĐT (ví dụ: PO):'),
+            ('abbr_plo',   'Viết tắt Chuẩn đầu ra CTĐT (ví dụ: PLO):'),
+            ('abbr_pi',    'Viết tắt Chỉ báo (ví dụ: PI):'),
+            ('abbr_mt',    'Viết tắt Mục tiêu học phần (MT/PEO...):'),
+            ('abbr_clo',   'Viết tắt Chuẩn đầu ra học phần (CLO/CDR...):'),
         ]
         
         self.entries = {}
@@ -52,10 +58,23 @@ class SettingsDialog(tb.Toplevel):
             row = tb.Frame(content)
             row.pack(fill='x', pady=8)
             
+            if key.startswith('sep'):
+                tb.Label(row, text=label, font=('Arial', 10, 'bold'), 
+                         bootstyle='info').pack(anchor='w', pady=(10, 0))
+                continue
+
             tb.Label(row, text=label, font=('Arial', 10)).pack(anchor='w')
             
             # Sử dụng Text cho các danh sách dài, Entry cho danh sách ngắn
             ent = tb.Entry(row, font=('Arial', 10))
+            # Gán giá trị mặc định nếu rỗng cho các trường viết tắt
+            if not val:
+                defaults = {
+                    'abbr_po': 'PO', 'abbr_plo': 'PLO', 'abbr_pi': 'PI',
+                    'abbr_mt': 'MT', 'abbr_clo': 'CLO'
+                }
+                val = defaults.get(key, '')
+                
             ent.insert(0, val)
             ent.pack(fill='x', pady=2)
             self.entries[key] = ent
@@ -89,7 +108,9 @@ class SettingsDialog(tb.Toplevel):
                 return
             self.db.set_config(key, val)
             
-        show_modern_info(self, "Thành công", "Đã lưu thiết lập hệ thống. Một số thay đổi sẽ có hiệu lực sau khi khởi động lại hoặc tải lại học phần.")
+        show_modern_info(self, "Thành công", "Đã lưu thiết lập hệ thống. Một số thay đổi sẽ có hiệu lực ngay lập tức, một số khác sẽ có hiệu lực sau khi tải lại học phần.")
+        if hasattr(self.master, 'refresh_ui'):
+            self.master.refresh_ui()
         self.destroy()
 
     def _backup(self):

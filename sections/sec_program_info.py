@@ -2,6 +2,7 @@
 import tkinter as tk
 import ttkbootstrap as tb
 from sections.base_section import BaseSection, ScrollableFrame, make_tree
+from utils.data_utils import natural_sort_key
 from sections.registry import register_section
 
 @register_section(order=0, label="0. Thông tin CTĐT")
@@ -34,21 +35,45 @@ class SecProgramInfo(BaseSection):
         stats_frm = tb.Frame(self.p, padding=20)
         stats_frm.pack(fill='x')
         
+        abbr_po = self.get_abbr('PO', 'PO')
+        abbr_plo = self.get_abbr('PLO', 'PLO')
+
         from sections.base_section import CLR_PRIMARY2
         self.card_hp = self._create_card(stats_frm, "📚 Số học phần", "0", 0, 'info')
         self.card_tc = self._create_card(stats_frm, "💎 Tổng tín chỉ", "0", 1, 'success')
-        self.card_po = self._create_card(stats_frm, "🎯 Số PO", "0", 2, 'warning')
-        self.card_plo = self._create_card(stats_frm, "🚀 Số PLO", "0", 3, 'danger')
+        self.card_po_lbl, self.card_po = self._create_card_with_label(stats_frm, f"🎯 Số {abbr_po}", "0", 2, 'warning')
+        self.card_plo_lbl, self.card_plo = self._create_card_with_label(stats_frm, f"🚀 Số {abbr_plo}", "0", 3, 'danger')
 
         # 3. Danh sách PLO
-        plo_lf = tb.Labelframe(self.p, text="Chuẩn đầu ra của Chương trình đào tạo (PLO)", padding=15)
-        plo_lf.pack(fill='both', expand=True, padx=20, pady=(0, 20))
+        self.plo_lf = tb.Labelframe(self.p, text=f"Chuẩn đầu ra của Chương trình đào tạo ({abbr_plo})", padding=15)
+        self.plo_lf.pack(fill='both', expand=True, padx=20, pady=(0, 20))
 
         cols = ("ma", "mo_ta")
-        heads = ("Mã PLO", "Mô tả chuẩn đầu ra")
+        heads = (f"Mã {abbr_plo}", "Mô tả chuẩn đầu ra")
         widths = (100, 700)
-        self.plo_tree_frm, self.plo_tree = make_tree(plo_lf, cols, heads, widths, height=12)
+        self.plo_tree_frm, self.plo_tree = make_tree(self.plo_lf, cols, heads, widths, height=12)
         self.plo_tree_frm.pack(fill='both', expand=True)
+
+    def refresh_labels(self):
+        """Cập nhật lại các nhãn khi cấu hình viết tắt thay đổi."""
+        if not self._ui_built: return
+        abbr_po = self.get_abbr('PO', 'PO')
+        abbr_plo = self.get_abbr('PLO', 'PLO')
+        self.card_po_lbl.config(text=f"🎯 Số {abbr_po}")
+        self.card_plo_lbl.config(text=f"🚀 Số {abbr_plo}")
+        self.plo_lf.config(text=f"Chuẩn đầu ra của Chương trình đào tạo ({abbr_plo})")
+        self.plo_tree.heading('ma', text=f'Mã {abbr_plo}')
+
+    def _create_card_with_label(self, parent, title, value, col, color):
+        card = tb.Frame(parent, bootstyle=color, padding=15)
+        card.grid(row=0, column=col, padx=10, sticky='nsew')
+        parent.columnconfigure(col, weight=1)
+        
+        t_lbl = tb.Label(card, text=title, font=('Arial', 10), bootstyle=f'{color}-inverse')
+        t_lbl.pack(anchor='w')
+        v_lbl = tb.Label(card, text=value, font=('Arial', 24, 'bold'), bootstyle=f'{color}-inverse')
+        v_lbl.pack(anchor='w')
+        return t_lbl, v_lbl
 
     def _create_info_item(self, parent, label, row, col):
         f = tb.Frame(parent)
@@ -90,6 +115,9 @@ class SecProgramInfo(BaseSection):
         
         # Load PLOs
         plos = self.db.get_plo_by_ctdt(ctdt_id)
+        # Sắp xếp tự nhiên
+        plos.sort(key=lambda x: natural_sort_key(x['ma']))
+        
         self.plo_tree.delete(*self.plo_tree.get_children())
         for i, p in enumerate(plos):
             tag = 'even' if i % 2 == 0 else 'odd'
@@ -107,6 +135,7 @@ class SecProgramInfo(BaseSection):
             self.load_ctdt(links[0]['ctdt_id'])
         else:
             self.clear_ui()
+        self._loading = False
 
     def clear_ui(self):
         self.lbl_title.config(text="Chưa chọn Chương trình đào tạo")

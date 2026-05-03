@@ -2,22 +2,23 @@
 from repositories.base_repository import BaseRepository
 
 class RubricRepository(BaseRepository):
-    def get_all(self, ma_hp):
-        return self.conn.execute("SELECT * FROM Rubric WHERE ma_hp=?", (ma_hp,)).fetchall()
+    def get_by_hp(self, hp_id: int):
+        return self.db.conn.execute(
+            "SELECT * FROM rubric_danh_gia WHERE hp_id=? ORDER BY thu_tu", 
+            (hp_id,)
+        ).fetchall()
 
-    def get_tieu_chi(self, rubric_id):
-        return self.conn.execute("SELECT * FROM Rubric_TieuChi WHERE rubric_id=? ORDER BY thu_tu", (rubric_id,)).fetchall()
+    def get_tieu_chi(self, rubric_id: int):
+        return self.db.conn.execute(
+            "SELECT * FROM rubric_tieu_chi WHERE rubric_id=? ORDER BY thu_tu", 
+            (rubric_id,)
+        ).fetchall()
 
-    def insert(self, data: dict):
-        fields = list(data.keys())
-        sql = f"INSERT INTO Rubric({','.join(fields)}) VALUES({','.join(['?']*len(fields))})"
-        cur = self.conn.execute(sql, list(data.values()))
-        self.conn.commit()
-        return cur.lastrowid
-
-    def insert_tieu_chi(self, data: dict):
-        fields = list(data.keys())
-        sql = f"INSERT INTO Rubric_TieuChi({','.join(fields)}) VALUES({','.join(['?']*len(fields))})"
-        cur = self.conn.execute(sql, list(data.values()))
-        self.conn.commit()
-        return cur.lastrowid
+    def get_full(self, hp_id: int):
+        rubrics = self.get_by_hp(hp_id)
+        result = []
+        for rb in rubrics:
+            rb_dict = dict(rb)
+            rb_dict['tieu_chi_list'] = [dict(tc) for tc in self.get_tieu_chi(rb_dict['id'])]
+            result.append(rb_dict)
+        return result

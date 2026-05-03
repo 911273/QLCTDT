@@ -64,6 +64,7 @@ class Sec15Checklist(BaseSection):
         data = dict(row) if row else {}
         self.apply_data_dict(data)
         self._initial_data = self.get_data_dict()
+        self._loading = False
 
     def save(self):
         if not self.hp_id: return

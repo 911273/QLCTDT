@@ -1,36 +1,49 @@
 # repositories/clo_repository.py
-from repositories.base_repository import BaseRepository
+from .base_repository import BaseRepository
+from typing import List, Optional
 
 class CLORepository(BaseRepository):
-    def get_all(self, ma_hp):
-        return self.conn.execute("SELECT * FROM CLO_Standard WHERE ma_hp=? ORDER BY thu_tu", (ma_hp,)).fetchall()
+    """Repository quản lý Chuẩn đầu ra (CLO) và Mục tiêu học phần."""
+    
+    # ── CLO ──────────────────────────────────────────────────────────────────
+    
+    def get_by_hp(self, hp_id: int) -> List[dict]:
+        return self._fetch_all("SELECT * FROM clo WHERE hp_id=? ORDER BY id", (hp_id,))
 
-    def get_by_id(self, id):
-        return self.conn.execute("SELECT * FROM CLO_Standard WHERE id=?", (id,)).fetchone()
+    def get_by_id(self, id_: int) -> Optional[dict]:
+        return self._fetch_one("SELECT * FROM clo WHERE id=?", (id_,))
 
-    def insert(self, data: dict):
-        fields = list(data.keys())
-        sql = f"INSERT INTO CLO_Standard({','.join(fields)}) VALUES({','.join(['?']*len(fields))})"
-        cur = self.conn.execute(sql, list(data.values()))
-        self.conn.commit()
-        return cur.lastrowid
+    def create(self, data: dict) -> int:
+        return self._safe_insert('clo', data)
 
-    def update(self, id, data: dict):
-        sets = ','.join(f"{k}=?" for k in data.keys())
-        self.conn.execute(f"UPDATE CLO_Standard SET {sets} WHERE id=?", list(data.values()) + [id])
-        self.conn.commit()
+    def update(self, id_: int, data: dict):
+        self._safe_update('clo', id_, data)
 
-    def delete(self, id):
-        self.conn.execute("DELETE FROM CLO_Standard WHERE id=?", (id,))
-        self.conn.commit()
+    def delete(self, id_: int):
+        self.conn.execute("DELETE FROM clo WHERE id=?", (id_,))
 
-    # MucTieu_HP
-    def get_all_muc_tieu(self, ma_hp):
-        return self.conn.execute("SELECT * FROM MucTieu_HP WHERE ma_hp=? ORDER BY thu_tu", (ma_hp,)).fetchall()
+    def set_all(self, hp_id: int, items: List[dict]):
+        """Xóa cũ và thêm mới toàn bộ CLO của 1 HP."""
+        with self.db.transaction():
+            self.conn.execute("DELETE FROM clo WHERE hp_id=?", (hp_id,))
+            for item in items:
+                item['hp_id'] = hp_id
+                self._safe_insert('clo', item)
 
-    def insert_muc_tieu(self, data: dict):
-        fields = list(data.keys())
-        sql = f"INSERT INTO MucTieu_HP({','.join(fields)}) VALUES({','.join(['?']*len(fields))})"
-        cur = self.conn.execute(sql, list(data.values()))
-        self.conn.commit()
-        return cur.lastrowid
+    # ── MucTieu ──────────────────────────────────────────────────────────────
+    
+    def get_muc_tieu_by_hp(self, hp_id: int) -> List[dict]:
+        return self._fetch_all("SELECT * FROM muc_tieu WHERE hp_id=? ORDER BY so_thu_tu", (hp_id,))
+
+    def set_muc_tieu_all(self, hp_id: int, items: List[dict]):
+        with self.db.transaction():
+            self.conn.execute("DELETE FROM muc_tieu WHERE hp_id=?", (hp_id,))
+            for i, item in enumerate(items):
+                item['hp_id'] = hp_id
+                item['so_thu_tu'] = i + 1
+                self._safe_insert('muc_tieu', item)
+
+    def create_muc_tieu(self, data: dict) -> int:
+        return self._safe_insert('muc_tieu', data)
+
+

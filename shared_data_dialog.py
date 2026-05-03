@@ -6,6 +6,7 @@ from utils.ui_utils import (show_modern_info, show_modern_warning,
                              show_modern_error, ask_modern_yesno)
 import openpyxl
 from tkinter import filedialog
+from utils.data_utils import natural_sort_key
 
 
 KHOI_KIEN_THUC = ['Đại cương', 'Cơ sở ngành', 'Ngành', 'Chuyên ngành', 'Khác']
@@ -149,9 +150,9 @@ class SharedDataDialog(tb.Toplevel):
         tb.Entry(sf, textvariable=self.v_gv_search, width=30,
                   font=('Arial', 10)).pack(side='left', padx=4)
 
-        cols   = ('ho_ten', 'hoc_vi', 'chuc_danh', 'ten_khoa', 'email')
-        heads  = ('Họ và tên', 'Học vị', 'Chức danh', 'Đơn vị', 'Email')
-        widths = (200, 100, 120, 180, 200)
+        cols   = ('ma_can_bo', 'ho_ten', 'hoc_vi', 'chuc_vu', 'ten_khoa', 'email')
+        heads  = ('Mã CB', 'Họ và tên', 'Học vị', 'Chức vụ', 'Đơn vị', 'Email')
+        widths = (80, 180, 80, 120, 180, 180)
         tf, self.gv_tree = make_tree(frm, cols, heads, widths, height=15, db=self.db, table_id='shared_gv')
         tf.pack(fill='both', expand=True)
         self.gv_tree.bind('<Double-1>', lambda _: self._gv_edit())
@@ -170,15 +171,19 @@ class SharedDataDialog(tb.Toplevel):
         self._khoa_map_gv = {'': None, **{k['ten']: k['id'] for k in khoas}}
         return [
             # Frame 1: Personal
+            ('ma_can_bo', 'Mã cán bộ',         'entry', {}),
             ('ho_ten',  'Họ và tên (*)',      'entry', {}),
+            ('gioi_tinh', 'Giới tính',         'combo', {'values': ['Nam', 'Nữ', 'Khác']}),
             ('ngay_sinh', 'Ngày sinh (dd/mm/yyyy)', 'entry', {}),
             ('cmnd_cccd', 'Số CMND/CCCD',      'entry', {}),
             ('sdt',     'Số điện thoại',       'entry', {}),
             ('email',   'Email',                'entry', {}),
+            ('dia_chi', 'Địa chỉ',             'entry', {}),
             ('khoa',    'Đơn vị/Khoa',         'combo', {'values': khoa_names, 'state': 'normal'}),
             # Frame 2: Education
             ('hoc_vi',  'Học vị (TS/ThS/...)','entry', {}),
             ('chuc_danh', 'Chức danh (GS/PGS)', 'entry', {}),
+            ('chuc_vu', 'Chức vụ',             'entry', {}),
             ('nam_phong_chuc_danh', 'Năm phong chức danh', 'entry', {}),
             ('trinh_do_chuyen_mon', 'Trình độ CM', 'entry', {}),
             ('co_so_dao_tao', 'Cơ sở đào tạo', 'entry', {}),
@@ -198,8 +203,8 @@ class SharedDataDialog(tb.Toplevel):
         for i, r in enumerate(rows):
             tag = 'even' if i % 2 == 0 else 'odd'
             self.gv_tree.insert('', 'end', iid=str(i),
-                                 values=(r['ho_ten'], r['hoc_vi'] or '',
-                                         r['chuc_danh'] or '',
+                                 values=(r['ma_can_bo'] or '', r['ho_ten'], r['hoc_vi'] or '',
+                                         r['chuc_vu'] or '',
                                          r['ten_khoa'] or '', r['email'] or ''), tags=(tag,))
             self._gv_ids.append(r['id'])
 
@@ -298,9 +303,11 @@ class SharedDataDialog(tb.Toplevel):
         tb.Button(bf, text='✏ Sửa',        command=self._ctdt_edit).pack(side='left', padx=4)
         tb.Button(bf, text='🗑 Xóa',        command=self._ctdt_delete).pack(side='left', padx=4)
         
+        abbr_po = self.db.get_config('abbr_po', 'PO')
+        abbr_plo = self.db.get_config('abbr_plo', 'PLO')
         tb.Label(bf, text='|').pack(side='left', padx=10)
-        tb.Button(bf, text='🎯 PO (Mục tiêu)', command=self._ctdt_manage_po).pack(side='left', padx=4)
-        tb.Button(bf, text='✅ PLO (Chuẩn đầu ra)', command=self._ctdt_manage_plo).pack(side='left', padx=4)
+        tb.Button(bf, text=f'🎯 {abbr_po} (Mục tiêu)', command=self._ctdt_manage_po).pack(side='left', padx=4)
+        tb.Button(bf, text=f'✅ {abbr_plo} (Chuẩn đầu ra)', command=self._ctdt_manage_plo).pack(side='left', padx=4)
         tb.Button(bf, text='📚 Học phần', command=self._ctdt_manage_hp).pack(side='left', padx=4)
         self._ctdt_refresh()
 
@@ -720,13 +727,20 @@ class SharedDataDialog(tb.Toplevel):
                 show_modern_info(self, "Hoàn thành", f"Đã nhập {success} học phần. Bỏ qua {skip} mục trùng mã.")
 
     def _gv_import_excel(self):
-        # 0: Họ tên, 1: Ngày sinh, 2: Học vị, 3: Chức danh, 4: Đơn vị, 5: Email, 6: SĐT, 7: CC/CMND
+        # 0: Mã CB, 1: Họ tên, 2: Giới tính, 3: Ngày sinh, 4: Học vị, 5: Chức danh, 6: Chức vụ, 7: Đơn vị, 8: Email, 9: SĐT, 10: CC/CMND, 11: Địa chỉ,
+        # 12: Năm phong CD, 13: Trình độ CM, 14: Cơ sở đào tạo, 15: Năm tốt nghiệp, 16: Ngành đào tạo, 17: Ngày tuyển dụng, 18: Mã BH, 19: Kinh nghiệm
         cols = [
-            ('ho_ten', 0, str), ('ngay_sinh', 1, str), ('hoc_vi', 2, str),
-            ('chuc_danh', 3, str), ('khoa_name', 4, str), ('email', 5, str),
-            ('sdt', 6, str), ('cmnd_cccd', 7, str)
+            ('ma_can_bo', 0, str), ('ho_ten', 1, str), ('gioi_tinh', 2, str),
+            ('ngay_sinh', 3, str), ('hoc_vi', 4, str), ('chuc_danh', 5, str),
+            ('chuc_vu', 6, str), ('khoa_name', 7, str), ('email', 8, str),
+            ('sdt', 9, str), ('cmnd_cccd', 10, str), ('dia_chi', 11, str),
+            ('nam_phong_chuc_danh', 12, str), ('trinh_do_chuyen_mon', 13, str), 
+            ('co_so_dao_tao', 14, str), ('nam_tot_nghiep', 15, str),
+            ('nganh_dao_tao', 16, str), ('ngay_tuyen_dung', 17, str),
+            ('ma_so_bao_hiem', 18, str), ('so_nam_kinh_nghiem', 19, str)
         ]
-        data = self._read_excel("Nhập danh sách Giảng viên (Họ tên, Ngày sinh, Học vị, Chức danh, Đơn vị, Email, SĐT, CCCD)", cols)
+        msg = "Nhập giảng viên từ Excel (20 cột dữ liệu từ Mã CB đến Kinh nghiệm)"
+        data = self._read_excel(msg, cols)
         if data:
             if ask_modern_yesno(self, "Xác nhận", f"Tìm thấy {len(data)} dòng. Nhập vào cơ sở dữ liệu?"):
                 khoas = self.db.get_all_khoa()
@@ -925,7 +939,8 @@ class _PoManagerDialog(tb.Toplevel):
         set_window_icon(self)
         self.db = parent.db
         self.ctdt_id = ctdt_id
-        self.title(f'Quản lý Mục tiêu (PO) - {ctdt_name}')
+        abbr_po = self.db.get_config('abbr_po', 'PO')
+        self.title(f'Quản lý Mục tiêu ({abbr_po}) - {ctdt_name}')
         self.geometry('800x550')
         self.grab_set()
         
@@ -933,7 +948,7 @@ class _PoManagerDialog(tb.Toplevel):
         frm.pack(fill='both', expand=True)
         
         cols = ('ma', 'mo_ta')
-        heads = ('Mã PO', 'Mô tả Mục tiêu (PO)')
+        heads = (f'Mã {abbr_po}', f'Mô tả Mục tiêu ({abbr_po})')
         widths = (100, 450)
         from sections.base_section import make_tree
         self.tf, self.tree = make_tree(frm, cols, heads, widths, height=12, db=self.db, table_id='po_manager')
@@ -941,31 +956,49 @@ class _PoManagerDialog(tb.Toplevel):
         
         bf = tb.Frame(frm)
         bf.pack(fill='x', pady=8)
-        tb.Button(bf, text='➕ Thêm PO', command=self._add).pack(side='left', padx=4)
+        self.btn_add = tb.Button(bf, text=f'➕ Thêm {abbr_po}', command=self._add)
+        self.btn_add.pack(side='left', padx=4)
         tb.Button(bf, text='✏ Sửa',      command=self._edit).pack(side='left', padx=4)
         tb.Button(bf, text='🗑 Xóa',      command=self._delete).pack(side='left', padx=4)
         tb.Button(bf, text='📥 Nhập từ Excel', command=self._import_excel, bootstyle='info-outline').pack(side='left', padx=4)
+        tb.Button(bf, text='🔢 Tự đánh số', command=self._auto_number, bootstyle='warning-outline').pack(side='right', padx=4)
         
         self._refresh()
 
     def _refresh(self):
         self.tree.delete(*self.tree.get_children())
         self._items = self.db.get_po_by_ctdt(self.ctdt_id)
+        # Sắp xếp tự nhiên theo mã
+        self._items.sort(key=lambda x: natural_sort_key(x['ma']))
+        
         for i, r in enumerate(self._items):
             tag = 'even' if i % 2 == 0 else 'odd'
             self.tree.insert('', 'end', iid=str(i), values=(r['ma'], r['mo_ta']), tags=(tag,))
 
+    def _auto_number(self):
+        abbr_po = self.db.get_config('abbr_po', 'PO')
+        if not self._items: return
+        if not ask_modern_yesno(self, 'Xác nhận', f'Tự động đánh lại mã {abbr_po} từ {abbr_po}1 đến {abbr_po}n?'):
+            return
+        for i, r in enumerate(self._items):
+            new_ma = f"{abbr_po}{i+1}"
+            if r['ma'] != new_ma:
+                self.db.update_po(r['id'], new_ma, r['mo_ta'])
+        self._refresh()
+
     def _add(self):
-        dlg = RowEditDialog(self, 'Thêm PO', [('ma','Mã PO','entry',{}), ('mo_ta','Mô tả','text',{})])
+        abbr_po = self.db.get_config('abbr_po', 'PO')
+        dlg = RowEditDialog(self, f'Thêm {abbr_po}', [('ma',f'Mã {abbr_po}','entry',{}), ('mo_ta','Mô tả','text',{})])
         if dlg.result:
             self.db.add_po(self.ctdt_id, dlg.result['ma'], dlg.result['mo_ta'])
             self._refresh()
 
     def _edit(self):
+        abbr_po = self.db.get_config('abbr_po', 'PO')
         sel = self.tree.selection()
         if not sel: return
         row = self._items[int(sel[0])]
-        dlg = RowEditDialog(self, 'Sửa PO', [('ma','Mã PO','entry',{}), ('mo_ta','Mô tả','text',{})], initial=dict(row))
+        dlg = RowEditDialog(self, f'Sửa {abbr_po}', [('ma',f'Mã {abbr_po}','entry',{}), ('mo_ta','Mô tả','text',{})], initial=dict(row))
         if dlg.result:
             self.db.update_po(row['id'], dlg.result['ma'], dlg.result['mo_ta'])
             self._refresh()
@@ -999,18 +1032,20 @@ class _PloManagerDialog(tb.Toplevel):
         set_window_icon(self)
         self.db = parent.db
         self.ctdt_id = ctdt_id
-        self.title(f'Quản lý Chuẩn đầu ra (PLO) & Chỉ báo (PI) - {ctdt_name}')
+        abbr_plo = self.db.get_config('abbr_plo', 'PLO')
+        abbr_pi = self.db.get_config('abbr_pi', 'PI')
+        self.title(f'Quản lý Chuẩn đầu ra ({abbr_plo}) & Chỉ báo ({abbr_pi}) - {ctdt_name}')
         self.geometry('1000x750')
         self.grab_set()
         
         frm = tb.Frame(self, padding=12)
         frm.pack(fill='both', expand=True)
         
-        tb.Label(frm, text='Danh sách PLO và các Chỉ báo (PI) tương ứng:', 
+        tb.Label(frm, text=f'Danh sách {abbr_plo} và các Chỉ báo ({abbr_pi}) tương ứng:', 
                   font=('Arial', 10, 'bold')).pack(anchor='w', pady=(0, 6))
 
         cols = ('ma', 'mo_ta')
-        heads = ('Mã', 'Nội dung Chuẩn đầu ra (PLO) / Chỉ báo (PI)')
+        heads = ('Mã', f'Nội dung {abbr_plo} / Chỉ báo ({abbr_pi})')
         widths = (120, 600)
         from sections.base_section import make_tree
         self.tf, self.tree = make_tree(frm, cols, heads, widths, height=18, db=self.db, table_id='plo_manager')
@@ -1023,20 +1058,26 @@ class _PloManagerDialog(tb.Toplevel):
         self.tree.tag_configure('plo', background='#4682B4', foreground='white', font=('Arial', 10, 'bold'))
         self.tree.tag_configure('pi',  background='#262626', foreground='white')
         
+        abbr_plo = self.db.get_config('abbr_plo', 'PLO')
+        abbr_pi = self.db.get_config('abbr_pi', 'PI')
+
         bf = tb.Frame(frm)
         bf.pack(fill='x', pady=8)
-        tb.Button(bf, text='➕ Thêm PLO', command=self._add_plo).pack(side='left', padx=4)
-        tb.Button(bf, text='🎯 Thêm PI',  command=self._add_pi).pack(side='left', padx=4)
+        tb.Button(bf, text=f'➕ Thêm {abbr_plo}', command=self._add_plo).pack(side='left', padx=4)
+        tb.Button(bf, text=f'🎯 Thêm {abbr_pi}',  command=self._add_pi).pack(side='left', padx=4)
         tb.Separator(bf, orient='vertical').pack(side='left', padx=10, fill='y')
         tb.Button(bf, text='✏ Sửa',      command=self._edit).pack(side='left', padx=4)
         tb.Button(bf, text='🗑 Xóa',      command=self._delete).pack(side='left', padx=4)
         tb.Button(bf, text='📥 Nhập từ Excel', command=self._import_excel, bootstyle='info-outline').pack(side='left', padx=4)
+        tb.Button(bf, text='🔢 Tự đánh số', command=self._auto_number, bootstyle='warning-outline').pack(side='right', padx=4)
         
         self._refresh()
 
     def _refresh(self):
         self.tree.delete(*self.tree.get_children())
         self._plo_items = self.db.get_plo_by_ctdt(self.ctdt_id)
+        # Sắp xếp tự nhiên theo mã PLO
+        self._plo_items.sort(key=lambda x: natural_sort_key(x['ma']))
         
         for plo in self._plo_items:
             plo_iid = f"plo_{plo['id']}"
@@ -1045,11 +1086,35 @@ class _PloManagerDialog(tb.Toplevel):
                              tags=('plo',), open=True)
             
             pis = self.db.get_pi_by_plo(plo['id'])
+            # Sắp xếp tự nhiên theo mã PI
+            pis.sort(key=lambda x: natural_sort_key(x['ma']))
             for pi in pis:
                 pi_iid = f"pi_{pi['id']}"
                 self.tree.insert(plo_iid, 'end', iid=pi_iid,
                                  values=(pi['ma'], pi['mo_ta']),
                                  tags=('pi',))
+
+    def _auto_number(self):
+        abbr_plo = self.db.get_config('abbr_plo', 'PLO')
+        abbr_pi = self.db.get_config('abbr_pi', 'PI')
+        if not self._plo_items: return
+        if not ask_modern_yesno(self, 'Xác nhận', f'Tự động đánh lại mã cho tất cả {abbr_plo} và {abbr_pi}?'):
+            return
+        
+        for i, plo in enumerate(self._plo_items):
+            new_plo_ma = f"{abbr_plo}{i+1}"
+            if plo['ma'] != new_plo_ma:
+                self.db.update_plo(plo['id'], new_plo_ma, plo['mo_ta'])
+            
+            pis = self.db.get_pi_by_plo(plo['id'])
+            # Sắp xếp PI hiện tại trước khi đánh số
+            pis.sort(key=lambda x: natural_sort_key(x['ma']))
+            for j, pi in enumerate(pis):
+                new_pi_ma = f"{abbr_pi}{i+1}.{j+1}"
+                if pi['ma'] != new_pi_ma:
+                    self.db.update_pi(pi['id'], new_pi_ma, pi['mo_ta'])
+        
+        self._refresh()
 
     def _get_selection(self):
         sel = self.tree.selection()
@@ -1064,15 +1129,18 @@ class _PloManagerDialog(tb.Toplevel):
         return None, None, None
 
     def _add_plo(self):
-        dlg = RowEditDialog(self, 'Thêm PLO mới', [('ma','Mã PLO','entry',{}), ('mo_ta','Mô tả','text',{})])
+        abbr_plo = self.db.get_config('abbr_plo', 'PLO')
+        dlg = RowEditDialog(self, f'Thêm {abbr_plo} mới', [('ma',f'Mã {abbr_plo}','entry',{}), ('mo_ta','Mô tả','text',{})])
         if dlg.result:
             self.db.add_plo(self.ctdt_id, dlg.result['ma'], dlg.result['mo_ta'])
             self._refresh()
 
     def _add_pi(self):
+        abbr_plo = self.db.get_config('abbr_plo', 'PLO')
+        abbr_pi = self.db.get_config('abbr_pi', 'PI')
         type, id, iid = self._get_selection()
         if not id:
-            show_modern_warning(self, 'Cảnh báo', 'Vui lòng chọn một PLO để thêm Chỉ báo (PI).')
+            show_modern_warning(self, 'Cảnh báo', f'Vui lòng chọn một {abbr_plo} để thêm {abbr_pi}.')
             return
         
         plo_id = id
@@ -1080,7 +1148,7 @@ class _PloManagerDialog(tb.Toplevel):
             parent_iid = self.tree.parent(iid)
             plo_id = int(parent_iid.replace('plo_', ''))
 
-        dlg = RowEditDialog(self, 'Thêm Chỉ báo (PI)', [('ma','Mã PI','entry',{}), ('mo_ta','Mô tả','text',{})])
+        dlg = RowEditDialog(self, f'Thêm {abbr_pi}', [('ma',f'Mã {abbr_pi}','entry',{}), ('mo_ta','Mô tả','text',{})])
         if dlg.result:
             self.db.add_pi(plo_id, dlg.result['ma'], dlg.result['mo_ta'])
             self._refresh()

@@ -5,8 +5,10 @@ from sections.base_section import (BaseSection, RowEditDialog, make_tree,
                                     recolor_tree, CLR_PRIMARY2, CLR_HDR)
 from utils.ui_utils import (show_modern_info, show_modern_warning, 
                              show_modern_error, ask_modern_yesno)
+from utils.data_utils import natural_sort_key
 
 
+import copy
 from sections.registry import register_section
 
 
@@ -29,10 +31,13 @@ class Sec4Clo(BaseSection):
         self.bind_all('<Control-y>', lambda e: self._redo())
 
     def _build_ui(self):
+        abbr_clo = self.get_abbr('CLO', 'CLO')
+        abbr_plo = self.get_abbr('PLO', 'PLO')
         head = tb.Frame(self, padding=(16, 12, 16, 4))
         head.pack(fill='x')
-        tb.Label(head, text='4. Chuẩn đầu ra học phần (CLO)',
-                  style='SectionHeader.TLabel').pack(anchor='w')
+        self.lbl_header = tb.Label(head, text=f'4. Chuẩn đầu ra học phần ({abbr_clo})',
+                  style='SectionHeader.TLabel')
+        self.lbl_header.pack(anchor='w')
         tb.Label(head,
                   text='Sau khi kết thúc học phần này, người học có thể:',
                   font=('Arial', 10, 'italic')).pack(anchor='w', pady=(2, 0))
@@ -42,7 +47,7 @@ class Sec4Clo(BaseSection):
         content.pack(fill='both', expand=True)
 
         cols   = ('ma', 'mo_ta', 'cdr_ma', 'level_irm')
-        heads  = ('CDR học phần', 'Mô tả', 'CDR CTĐT', 'Mức độ')
+        heads  = (f'CDR học phần ({abbr_clo})', 'Mô tả', f'CDR CTĐT ({abbr_plo})', 'Mức độ')
         widths = (100, 480, 100, 60)
         aligns = ('center', 'w', 'center', 'center')
         self.tree_frm, self.tree = make_tree(content, cols, heads, widths, height=14, column_aligns=aligns, db=self.db, table_id='sec4_clo')
@@ -56,8 +61,9 @@ class Sec4Clo(BaseSection):
 
         btns_frm = tb.Frame(self, padding=(16, 4, 16, 8))
         btns_frm.pack(fill='x')
-        tb.Button(btns_frm, text='➕ Thêm CLO', style='Primary.TButton',
-                   command=self._add).pack(side='left', padx=4)
+        self.btn_add = tb.Button(btns_frm, text=f'➕ Thêm {abbr_clo}', style='Primary.TButton',
+                   command=self._add)
+        self.btn_add.pack(side='left', padx=4)
         tb.Button(btns_frm, text='✏ Sửa',
                    command=self._edit).pack(side='left', padx=4)
         tb.Button(btns_frm, text='🗑 Xóa',
@@ -67,8 +73,21 @@ class Sec4Clo(BaseSection):
         tb.Button(btns_frm, text='⬇ Xuống',
                    command=lambda: self._move(1)).pack(side='left', padx=4)
         
-        tb.Button(btns_frm, text='🔢 Tự đánh số CLO',
-                   command=self._auto_number).pack(side='right', padx=4)
+        self.btn_auto = tb.Button(btns_frm, text=f'🔢 Tự đánh số {abbr_clo}',
+                   command=self._auto_number)
+        self.btn_auto.pack(side='right', padx=4)
+
+    def refresh_labels(self):
+        """Cập nhật lại các nhãn khi cấu hình viết tắt thay đổi."""
+        if not self._ui_built: return
+        abbr_clo = self.get_abbr('CLO', 'CLO')
+        abbr_plo = self.get_abbr('PLO', 'PLO')
+        self.lbl_header.config(text=f'4. Chuẩn đầu ra học phần ({abbr_clo})')
+        self.btn_add.config(text=f'➕ Thêm {abbr_clo}')
+        self.btn_auto.config(text=f'🔢 Tự đánh số {abbr_clo}')
+        # Update Treeview headers
+        self.tree.heading('ma', text=f'CDR học phần ({abbr_clo})')
+        self.tree.heading('cdr_ma', text=f'CDR CTĐT ({abbr_plo})')
         
         self._rows = []
 
@@ -78,23 +97,40 @@ class Sec4Clo(BaseSection):
         self.tree.tag_configure('group', background=CLR_HDR)
 
     def _get_cdr_list(self):
+        from utils.data_utils import natural_sort_key
         if not self.hp_id: return []
         links = self.db.get_ctdt_of_hp(self.hp_id)
         res = []
+        seen_mas = set()
+
         for l in links:
-            cid = l['ctdt_id'] # ctdt_id
+            cid = l['ctdt_id']
             plos = self.db.get_plo_by_ctdt(cid)
+            # Sắp xếp PLO tự nhiên
+            plos.sort(key=lambda x: natural_sort_key(x['ma']))
+            
             for plo in plos:
-                res.append(f"{plo['ma']}: {plo['mo_ta']}")
+                plo_str = f"{plo['ma']}: {plo['mo_ta']}"
+                if plo['ma'] not in seen_mas:
+                    res.append(plo_str)
+                    seen_mas.add(plo['ma'])
+                
                 pis = self.db.get_pi_by_plo(plo['id'])
+                # Sắp xếp PI tự nhiên
+                pis.sort(key=lambda x: natural_sort_key(x['ma']))
                 for pi in pis:
-                    res.append(f"{pi['ma']}: {pi['mo_ta']}")
+                    pi_str = f"{pi['ma']}: {pi['mo_ta']}"
+                    if pi['ma'] not in seen_mas:
+                        res.append(pi_str)
+                        seen_mas.add(pi['ma'])
         
         # Fallback/Merge with global cdr_ctdt
         globals = self.db.get_all_cdr_ctdt()
+        globals.sort(key=lambda x: natural_sort_key(x['ma']))
         for g in globals:
-            s = f"{g['ma']}: {g['mo_ta']}"
-            if s not in res: res.append(s)
+            if g['ma'] not in seen_mas:
+                res.append(f"{g['ma']}: {g['mo_ta']}")
+                seen_mas.add(g['ma'])
         return res
 
     def _fields(self, initial_cdr='', initial_nhom='Kiến thức', initial_irm='I'):
@@ -111,7 +147,7 @@ class Sec4Clo(BaseSection):
             # ('nhom',   'Nhóm',               'combo', {'values': self.CLO_GROUPS}), # Removed grouping
             ('ma',     'Mã CLO (vd: CLO1)', 'entry', {}),
             ('mo_ta',  'Mô tả',              'text',  {}),
-            ('cdr_ma_full', 'CDR CTĐT',       'multi_picker', {'values': self._get_cdr_list()}),
+            ('cdr_ma_full', 'CDR CTĐT',       'cdr_picker', {'db': self.db, 'hp_id': self.hp_id}),
             ('level_irm', 'Mức độ (I/R/M)',   'combo', {'values': ['I', 'R', 'M']}),
         ], {'cdr_ma_full': full_cdr, 'level_irm': initial_irm}
 
@@ -124,12 +160,14 @@ class Sec4Clo(BaseSection):
         
         # Chỉ lấy các CLO thực
         clos = [r for r in rows if not r.get('la_tieu_de_nhom')]
+        # Sắp xếp tự nhiên theo mã CLO
+        clos.sort(key=lambda x: natural_sort_key(x.get('ma')))
         
         for i, r in enumerate(clos):
             tag = 'even' if i % 2 == 0 else 'odd'
             self.tree.insert('', 'end', iid=str(rows.index(r)),
                              values=(r.get('ma', ''), r.get('mo_ta', ''), 
-                                     r.get('cdr_ma', ''), r.get('level_irm', 'I')),
+                                     self.extract_codes(r.get('cdr_ma', '')), r.get('level_irm', 'I')),
                              tags=(tag,))
         self._rows = rows
 
@@ -142,10 +180,10 @@ class Sec4Clo(BaseSection):
                        'nhom': r['nhom'] or 'Kiến thức', 'la_tieu_de_nhom': 0}
                       for r in db_rows if not r['la_tieu_de_nhom']]
         self._refresh(self._rows)
-        self.is_modified = False # Reset modified after initial load
         
         # Accuracy: Store initial data
-        self._initial_data = self.get_data_dict()
+        self._initial_data = copy.deepcopy(self.get_data_dict())
+        self._loading = False
 
     def save(self):
         if self.hp_id is not None:
@@ -174,6 +212,7 @@ class Sec4Clo(BaseSection):
         super().clear()
         self.tree.delete(*self.tree.get_children())
         self._rows = []
+        self.mark_modified()
 
     def _save_undo(self):
         """Lưu bản sao của _rows vào undo stack."""
@@ -200,19 +239,18 @@ class Sec4Clo(BaseSection):
         self.mark_modified()
 
     def _add(self):
+        abbr_clo = self.get_abbr('CLO', 'CLO')
         flds, init = self._fields()
-        dlg = RowEditDialog(self, 'Thêm CLO', flds, initial=init)
+        dlg = RowEditDialog(self, f'Thêm {abbr_clo}', flds, initial=init)
         if dlg.result:
             self._save_undo()
             new_ma = dlg.result.get('ma', '').strip().upper()
             # Accuracy: Check uniqueness
-            if any(r['ma'].strip().upper() == new_ma for r in self._rows):
-                show_modern_error(self, 'Lỗi', f'Mã CLO "{new_ma}" đã tồn tại!')
+            if any((r.get('ma') or '').strip().upper() == new_ma for r in self._rows):
+                show_modern_error(self, 'Lỗi', f'Mã {abbr_clo} "{new_ma}" đã tồn tại!')
                 return
 
-            cdr_full = dlg.result.get('cdr_ma_full', '')
-            codes = [c.split(':')[0].strip() for c in cdr_full.split(',') if c.strip()]
-            ma_pi = ", ".join(codes)
+            ma_pi = self.extract_codes(dlg.result.get('cdr_ma_full', ''))
             self._rows.append({'la_tieu_de_nhom': 0, 
                                'nhom': None,
                                'ma': new_ma,
@@ -225,6 +263,7 @@ class Sec4Clo(BaseSection):
     # REMOVED _add_group as requested
 
     def _edit(self):
+        abbr_clo = self.get_abbr('CLO', 'CLO')
         sel = self.tree.selection()
         if not sel or sel[0].startswith('grp_'):
             return
@@ -234,18 +273,16 @@ class Sec4Clo(BaseSection):
         flds, init = self._fields(row.get('cdr_ma', ''), initial_nhom=row.get('nhom', 'Kiến thức'))
         init.update({'ma': row.get('ma', ''), 'mo_ta': row.get('mo_ta', '')})
 
-        dlg = RowEditDialog(self, 'Sửa CLO', flds, initial=init)
+        dlg = RowEditDialog(self, f'Sửa {abbr_clo}', flds, initial=init)
         if dlg.result:
             self._save_undo()
             new_ma = dlg.result.get('ma', '').strip().upper()
             # Accuracy: Check uniqueness (bỏ qua chính nó)
-            if any(i != idx and r['ma'].strip().upper() == new_ma for i, r in enumerate(self._rows)):
-                show_modern_error(self, 'Lỗi', f'Mã CLO "{new_ma}" đã tồn tại!')
+            if any(i != idx and (r.get('ma') or '').strip().upper() == new_ma for i, r in enumerate(self._rows)):
+                show_modern_error(self, 'Lỗi', f'Mã {abbr_clo} "{new_ma}" đã tồn tại!')
                 return
 
-            cdr_full = dlg.result.get('cdr_ma_full', '')
-            codes = [c.split(':')[0].strip() for c in cdr_full.split(',') if c.strip()]
-            ma_pi = ", ".join(codes)
+            ma_pi = self.extract_codes(dlg.result.get('cdr_ma_full', ''))
             row['ma'] = new_ma
             row['mo_ta'] = dlg.result.get('mo_ta', '')
             row['cdr_ma'] = ma_pi
@@ -254,10 +291,11 @@ class Sec4Clo(BaseSection):
             self.mark_modified()
 
     def _delete(self):
+        abbr_clo = self.get_abbr('CLO', 'CLO')
         sel = self.tree.selection()
         if not sel:
             return
-        if not ask_modern_yesno(self, 'Xác nhận', 'Xóa CLO đã chọn?'):
+        if not ask_modern_yesno(self, 'Xác nhận', f'Xóa {abbr_clo} đã chọn?'):
             return
         self._save_undo()
         self._rows.pop(int(sel[0]))
@@ -278,10 +316,16 @@ class Sec4Clo(BaseSection):
             self.mark_modified()
 
     def _auto_number(self):
+        if not self._rows: return
+        self._save_undo()
+        # Sắp xếp theo mã hiện tại trước khi đánh số lại
+        self._rows.sort(key=lambda x: natural_sort_key(x.get('ma')))
+        
+        abbr_clo = self.get_abbr('CLO', 'CLO')
         stt = 1
-        for i, r in enumerate(self._rows):
+        for r in self._rows:
             if not r.get('la_tieu_de_nhom'):
-                r['ma'] = f'CLO{stt}'
+                r['ma'] = f'{abbr_clo}{stt}'
                 stt += 1
         self._refresh(self._rows)
         self.mark_modified()

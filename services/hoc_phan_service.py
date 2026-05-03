@@ -68,13 +68,26 @@ class HocPhanService:
                     self.db.set_rubric(hp_id, sec_data.get('rubric_list', []))
             
             elif sec_key == 'sec9':
+                # Phục vụ Sec13CapNhat (Lịch sử & Chữ ký)
                 sig_fields = ['dia_diem_ky', 'ngay_ky', 'chuc_danh_ky_trai', 'ho_ten_ky_trai', 'chuc_danh_ky_phai', 'ho_ten_ky_phai']
                 sig_data = {k: sec_data[k] for k in sig_fields if k in sec_data}
                 if sig_data:
                     self.repo.update(hp_id, sig_data)
-                self.repo.set_lich_su(hp_id, sec_data.get('rows', []))
+                if 'rows' in sec_data:
+                    self.repo.set_lich_su(hp_id, sec_data['rows'])
+
+            elif sec_key == 'sec9_quy_dinh':
+                # Phục vụ Sec9QuyDinh
+                self.repo.update(hp_id, {'quy_dinh_hp': sec_data.get('quy_dinh_hp', '')})
+
+            elif sec_key == 'sec11':
+                # Phục vụ Sec11DoiNgu
+                if 'rows' in sec_data:
+                    self.repo.set_gv(hp_id, sec_data['rows'])
 
         self.repo.delete_draft(hp_id)
+        from core.logger import logger
+        logger.info(f"Successfully saved partial data for HP ID: {hp_id}. Modified sections: {list(modified_data.keys())}")
         return True
 
     def save_hoc_phan(self, hp_id, data):

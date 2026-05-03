@@ -37,6 +37,7 @@ class Sec2MoTa(BaseSection):
         self.txt.configure(yscrollcommand=vsb.set)
         self.txt.pack(side='left', fill='both', expand=True)
         vsb.pack(side='right', fill='y')
+        self.txt.bind('<KeyRelease>', lambda _: self.mark_modified())
 
         self._register_field('mo_ta', label_widget=lbl, input_widget=self.txt, frame=txt_frame)
 
@@ -46,6 +47,7 @@ class Sec2MoTa(BaseSection):
         self.txt.delete('1.0', 'end')
         val = hp['mo_ta'] if hp and hp['mo_ta'] else ''
         self.txt.insert('1.0', val)
+        self._loading = False
 
     def save(self):
         if self.hp_id is not None:

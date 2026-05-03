@@ -1,12 +1,11 @@
-# word_import.py
-# FIXED: C-01 (ma_clo→ma), C-06 (set_noi_dung_hp), C-07 (set_ke_hoach_kt args), C-08 (set_rubric)
-# FIXED: M-10 (cải thiện table detection)
+# word_import.py - Pure Parser
 import re
 from docx import Document
 import unicodedata
 
-
 class DCCTHPImporter:
+    """Parser class for Syllabus Word documents. 
+    NO DATABASE LOGIC ALLOWED HERE."""
     def __init__(self):
         self.data = {
             'hp': {},
@@ -18,7 +17,8 @@ class DCCTHPImporter:
             'danh_gia': [],
             'rubrics': []
         }
-        self.logs = []  # [('success'|'error', 'tab_name', 'message')]
+        self.logs = []
+
 
     def import_from_docx(self, file_path):
         try:
@@ -332,91 +332,6 @@ def parse_docx(file_path):
     return importer.import_from_docx(file_path)
 
 
-def import_single(db, result_dict, khoa_id=None):
-    """
-    FIXED C-06, C-07, C-08: Gọi đúng tên hàm DB với đúng số lượng argument.
-    Toàn bộ import wrapped trong 1 transaction lớn để đảm bảo atomicity.
-    """
-    data = result_dict
-    hp_data = data.get('hp', {})
-    if khoa_id:
-        hp_data['khoa_id'] = khoa_id
+# Removed legacy import_single function as per P2 refactor. 
+# Logic moved to ImportExportService.save_imported_data()
 
-    local_logs = []
-    hp_id = None
-
-    # 1. Insert/Update Hoc Phan (bắt buộc thành công — nếu fail thì dừng)
-    try:
-        ma = hp_data.get('ma')
-        if ma:
-            existing = db.conn.execute("SELECT id FROM hoc_phan WHERE ma=?", (ma,)).fetchone()
-            if existing:
-                hp_id = existing[0]
-                db.update_hoc_phan(hp_id, hp_data)
-                local_logs.append(("success", "Thông tin chung", "Cập nhật thông tin học phần hiện có."))
-
-        if not hp_id:
-            hp_id = db.add_hoc_phan(hp_data)
-            local_logs.append(("success", "Thông tin chung", "Tạo mới học phần thành công."))
-    except Exception as e:
-        local_logs.append(("error", "Thông tin chung", f"Lỗi nghiêm trọng: {str(e)}"))
-        return None, local_logs
-
-    # 2. Lưu các dữ liệu liên quan — mỗi phần trong try/except riêng (Partial Import)
-    def _safe_save(section_name, func, *args):
-        """Lưu an toàn từng section, log lỗi nhưng không dừng toàn bộ import."""
-        try:
-            func(*args)
-            local_logs.append(("success", section_name, "Lưu thành công."))
-        except Exception as e:
-            local_logs.append(("error", section_name, f"Lỗi: {str(e)}"))
-
-    # Mục tiêu
-    muc_tieu = data.get('muc_tieu', [])
-    if muc_tieu:
-        _safe_save("Mục tiêu", db.set_muc_tieu, hp_id, muc_tieu)
-
-    # CLO
-    clos = data.get('clos', [])
-    if clos:
-        _safe_save("Chuẩn đầu ra (CLO)", db.set_clo, hp_id, clos)
-
-    # Học liệu
-    hoc_lieu = data.get('hoc_lieu', [])
-    if hoc_lieu:
-        _safe_save("Học liệu", db.set_hoc_lieu, hp_id, hoc_lieu)
-
-    # FIXED C-06: Dùng add_noi_dung thay vì set_noi_dung_hp (không tồn tại)
-    noi_dung = data.get('noi_dung', [])
-    if noi_dung:
-        def _save_noi_dung(hp_id, items):
-            """Xóa nội dung cũ và thêm mới."""
-            with db.transaction():
-                db.conn.execute("DELETE FROM noi_dung WHERE hp_id=?", (hp_id,))
-                for item in items:
-                    nd = {**item, 'hp_id': hp_id}
-                    safe_nd = db._safe_fields('noi_dung', nd)
-                    cols = list(safe_nd.keys())
-                    db.conn.execute(
-                        f"INSERT INTO noi_dung({','.join(cols)}) VALUES({','.join(['?']*len(cols))})",
-                        list(safe_nd.values())
-                    )
-        _safe_save("Nội dung chi tiết", _save_noi_dung, hp_id, noi_dung)
-
-    # FIXED C-07: Truyền đúng (hp_id, items) — 2 arguments
-    danh_gia = data.get('danh_gia', [])
-    if danh_gia:
-        _safe_save("Kế hoạch đánh giá", db.set_ke_hoach_kt, hp_id, danh_gia)
-
-    # FIXED C-08: db.set_rubric đã tồn tại — gọi đúng (hp_id, items)
-    rubrics = data.get('rubrics', [])
-    if rubrics:
-        _safe_save("Rubrics", db.set_rubric, hp_id, rubrics)
-
-    # 3. Finalize — tự tính lại tổng giờ từ nội dung
-    try:
-        db.calculate_and_update_hours(hp_id)
-    except Exception as e:
-        print(f"[import_single] calculate_and_update_hours: {e}")
-
-    return hp_id, local_logs

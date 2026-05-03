@@ -86,7 +86,7 @@ class Sec5CoSoVatChat(BaseSection):
 
     def save(self):
         if self.hp_id is not None:
-             self.db.update_hoc_lieu_batch(self.hp_id, self.get_data_dict()['rows'])
+             self.db.set_hoc_lieu(self.hp_id, self.get_data_dict()['rows'])
 
     def get_data_dict(self):
         self.ensure_ui()
@@ -166,6 +166,7 @@ class _HocLieuTab(tb.Frame):
             row['loai'] = self.loai
             self._rows.append(row)
             self.load_rows(self._rows)
+            self.master.master.mark_modified()
 
     def _edit(self):
         sel = self.tree.selection()
@@ -177,6 +178,7 @@ class _HocLieuTab(tb.Frame):
             self._rows[idx].update(dlg.result)
             self._rows[idx]['loai'] = self.loai
             self.load_rows(self._rows)
+            self.master.master.mark_modified()
 
     def _delete(self):
         sel = self.tree.selection()
@@ -185,6 +187,7 @@ class _HocLieuTab(tb.Frame):
             self.master.master._save_undo()
             self._rows.pop(int(sel[0]))
             self.load_rows(self._rows)
+            self.master.master.mark_modified()
 
     def _move(self, direction):
         sel = self.tree.selection()
@@ -196,6 +199,7 @@ class _HocLieuTab(tb.Frame):
             self._rows[idx], self._rows[new_idx] = self._rows[new_idx], self._rows[idx]
             self.load_rows(self._rows)
             self.tree.selection_set(str(new_idx))
+            self.master.master.mark_modified()
 
     def _pick_from_shared(self):
         from sections.sec5_hoc_lieu import _TaiLieuPickDialog
@@ -212,6 +216,7 @@ class _HocLieuTab(tb.Frame):
                 }
                 self._rows.append(new_row)
             self.load_rows(self._rows)
+            self.master.master.mark_modified()
             show_modern_info(self, 'Thành công', f'Đã thêm {len(dlg.result)} tài liệu.')
 
 

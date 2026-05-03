@@ -7,6 +7,7 @@ from utils.ui_utils import (show_modern_info, show_modern_warning,
                              show_modern_error, ask_modern_yesno)
 
 
+import copy
 from sections.registry import register_section
 
 
@@ -47,10 +48,12 @@ class Sec3MucTieu(BaseSection):
         self.mark_modified()
 
     def _build_ui(self):
+        abbr_mt = self.get_abbr('MT', 'MT')
         head = tb.Frame(self, padding=(16, 12, 16, 4))
         head.pack(fill='x')
-        tb.Label(head, text='3. Mục tiêu của học phần (MT)',
-                  style='SectionHeader.TLabel').pack(anchor='w')
+        self.lbl_header = tb.Label(head, text=f'3. Mục tiêu của học phần ({abbr_mt})',
+                  style='SectionHeader.TLabel')
+        self.lbl_header.pack(anchor='w')
         tb.Label(head,
                   text='Học phần này trang bị cho sinh viên / cung cấp cho sinh viên:',
                   font=('Arial', 10, 'italic')).pack(anchor='w', pady=(2, 0))
@@ -61,10 +64,10 @@ class Sec3MucTieu(BaseSection):
         content.pack(fill='both', expand=True)
 
         cols   = ('stt', 'mo_ta', 'cdr_ma')
-        heads  = ('Mục tiêu', 'Mô tả', 'CDR CTĐT')
+        self.tree_heads = (f'Mục tiêu ({abbr_mt})', 'Mô tả', 'CDR CTĐT')
         widths = (80, 560, 100)
         aligns = ('center', 'w', 'center')
-        self.tree_frm, self.tree = make_tree(content, cols, heads, widths, height=14, column_aligns=aligns, db=self.db, table_id='sec3_muc_tieu')
+        self.tree_frm, self.tree = make_tree(content, cols, self.tree_heads, widths, height=14, column_aligns=aligns, db=self.db, table_id='sec3_muc_tieu')
         self.tree_frm.pack(fill='both', expand=True)
         self.tree.bind('<Double-1>', lambda _e: self._edit())
         
@@ -76,14 +79,23 @@ class Sec3MucTieu(BaseSection):
         # ── Buttons ─────────────────────────────────────────────────────────
         bf = tb.Frame(self, padding=(16, 4, 16, 8))
         bf.pack(fill='x')
-        tb.Button(bf, text='➕ Thêm MT', command=self._add).pack(side='left', padx=4)
+        self.btn_add = tb.Button(bf, text=f'➕ Thêm {abbr_mt}', command=self._add)
+        self.btn_add.pack(side='left', padx=4)
         # tb.Button(bf, text='📂 Thêm Nhóm', command=self._add_group).pack(side='left', padx=4)
         tb.Button(bf, text='✏ Sửa',   command=self._edit).pack(side='left', padx=4)
         tb.Button(bf, text='🗑 Xóa',   command=self._delete).pack(side='left', padx=4)
         tb.Button(bf, text='⬆ Lên',   command=lambda: self._move(-1)).pack(side='left', padx=4)
         tb.Button(bf, text='⬇ Xuống', command=lambda: self._move(1)).pack(side='left', padx=4)
-
         self._rows = []
+
+    def refresh_labels(self):
+        """Cập nhật lại các nhãn khi cấu hình viết tắt thay đổi."""
+        if not self._ui_built: return
+        abbr_mt = self.get_abbr('MT', 'MT')
+        self.lbl_header.config(text=f'3. Mục tiêu của học phần ({abbr_mt})')
+        self.btn_add.config(text=f'➕ Thêm {abbr_mt}')
+        # Update Treeview header
+        self.tree.heading('stt', text=f'Mục tiêu ({abbr_mt})')
 
     def update_theme(self):
         if not self._ui_built: return
@@ -91,23 +103,40 @@ class Sec3MucTieu(BaseSection):
         self.tree.tag_configure('group', background=CLR_HDR, foreground=CLR_PRIMARY2)
 
     def _get_cdr_list(self):
+        from utils.data_utils import natural_sort_key
         if not self.hp_id: return []
         links = self.db.get_ctdt_of_hp(self.hp_id)
         res = []
+        seen_mas = set()
+
         for l in links:
-            cid = l['ctdt_id'] # ctdt_id
+            cid = l['ctdt_id']
             plos = self.db.get_plo_by_ctdt(cid)
+            # Sắp xếp PLO tự nhiên
+            plos.sort(key=lambda x: natural_sort_key(x['ma']))
+            
             for plo in plos:
-                res.append(f"{plo['ma']}: {plo['mo_ta']}")
+                plo_str = f"{plo['ma']}: {plo['mo_ta']}"
+                if plo['ma'] not in seen_mas:
+                    res.append(plo_str)
+                    seen_mas.add(plo['ma'])
+                
                 pis = self.db.get_pi_by_plo(plo['id'])
+                # Sắp xếp PI tự nhiên
+                pis.sort(key=lambda x: natural_sort_key(x['ma']))
                 for pi in pis:
-                    res.append(f"{pi['ma']}: {pi['mo_ta']}")
+                    pi_str = f"{pi['ma']}: {pi['mo_ta']}"
+                    if pi['ma'] not in seen_mas:
+                        res.append(pi_str)
+                        seen_mas.add(pi['ma'])
         
-        # Fallback/Merge with global cdr_ctdt
+        # Fallback/Merge with global cdr_ctdt (cũng cần sắp xếp nếu muốn đẹp, nhưng ưu tiên theo PLO/PI)
         globals = self.db.get_all_cdr_ctdt()
+        globals.sort(key=lambda x: natural_sort_key(x['ma']))
         for g in globals:
-            s = f"{g['ma']}: {g['mo_ta']}"
-            if s not in res: res.append(s)
+            if g['ma'] not in seen_mas:
+                res.append(f"{g['ma']}: {g['mo_ta']}")
+                seen_mas.add(g['ma'])
         return res
 
     def _fields(self, initial_cdr=''):
@@ -122,7 +151,7 @@ class Sec3MucTieu(BaseSection):
         
         return [
             ('mo_ta',  'Mô tả mục tiêu', 'text',  {}),
-            ('cdr_ma_full', 'CDR CTĐT', 'multi_picker', {'values': self._get_cdr_list()}),
+            ('cdr_ma_full', 'CDR CTĐT', 'cdr_picker', {'db': self.db, 'hp_id': self.hp_id}),
         ], {'cdr_ma_full': full_cdr}
 
     def _refresh(self, data_rows):
@@ -141,10 +170,11 @@ class Sec3MucTieu(BaseSection):
                                  tags=('group',))
             else:
                 tag = 'even' if i % 2 == 0 else 'odd'
+                abbr_mt = self.get_abbr('MT', 'MT')
                 self.tree.insert('', 'end', iid=str(i),
-                                 values=(f"MT{stt}",
+                                 values=(f"{abbr_mt}{stt}",
                                          row.get('mo_ta', ''),
-                                         row.get('cdr_ma', '')),
+                                         self.extract_codes(row.get('cdr_ma', ''))),
                                  tags=(tag,))
                 stt += 1
         self._rows = data_rows
@@ -162,10 +192,10 @@ class Sec3MucTieu(BaseSection):
                        'mo_ta': r['mo_ta'], 'cdr_ma': r['cdr_ma'],
                        'nhom': r['nhom'], 'la_tieu_de_nhom': r['la_tieu_de_nhom']} for r in rows]
         self._refresh(self._rows)
-        self.is_modified = False # Reset modified after initial load
 
         # Accuracy: Store initial data
-        self._initial_data = self.get_data_dict()
+        self._initial_data = copy.deepcopy(self.get_data_dict())
+        self._loading = False
 
     def save(self):
         if self.hp_id is not None:
@@ -200,15 +230,15 @@ class Sec3MucTieu(BaseSection):
         super().clear()
         self.tree.delete(*self.tree.get_children())
         self._rows = []
+        self.mark_modified()
 
     def _add(self):
+        abbr_mt = self.get_abbr('MT', 'MT')
         flds, init = self._fields()
-        dlg = RowEditDialog(self, 'Thêm mục tiêu', flds, initial=init)
+        dlg = RowEditDialog(self, f'Thêm {abbr_mt}', flds, initial=init)
         if dlg.result:
             self._save_undo()
-            cdr_full = dlg.result.get('cdr_ma_full', '')
-            codes = [c.split(':')[0].strip() for c in cdr_full.split(',') if c.strip()]
-            ma = ", ".join(codes)
+            ma = self.extract_codes(dlg.result.get('cdr_ma_full', ''))
             self._rows.append({'la_tieu_de_nhom': 0, 'nhom': None,
                                'mo_ta': dlg.result.get('mo_ta', ''),
                                'cdr_ma': ma})
@@ -225,6 +255,7 @@ class Sec3MucTieu(BaseSection):
             self.mark_modified()
 
     def _edit(self):
+        abbr_mt = self.get_abbr('MT', 'MT')
         sel = self.tree.selection()
         if not sel:
             return
@@ -243,22 +274,21 @@ class Sec3MucTieu(BaseSection):
         flds, init = self._fields(row.get('cdr_ma', ''))
         init['mo_ta'] = row.get('mo_ta', '')
         
-        dlg = RowEditDialog(self, 'Sửa mục tiêu', flds, initial=init)
+        dlg = RowEditDialog(self, f'Sửa {abbr_mt}', flds, initial=init)
         if dlg.result:
             self._save_undo()
-            cdr_full = dlg.result.get('cdr_ma_full', '')
-            codes = [c.split(':')[0].strip() for c in cdr_full.split(',') if c.strip()]
-            ma = ", ".join(codes)
+            ma = self.extract_codes(dlg.result.get('cdr_ma_full', ''))
             row['mo_ta']  = dlg.result.get('mo_ta', '')
             row['cdr_ma'] = ma
             self._refresh(self._rows)
             self.mark_modified()
 
     def _delete(self):
+        abbr_mt = self.get_abbr('MT', 'MT')
         sel = self.tree.selection()
         if not sel:
             return
-        if not ask_modern_yesno(self, 'Xác nhận', 'Xóa mục tiêu đã chọn?'):
+        if not ask_modern_yesno(self, 'Xác nhận', f'Xóa {abbr_mt} đã chọn?'):
             return
         self._save_undo()
         idx = int(sel[0])

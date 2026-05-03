@@ -86,7 +86,8 @@ class TemplateEngine:
         # GV
         gv_rows = db.conn.execute("""
             SELECT hpgv.ho_ten, hpgv.hoc_ham_vi AS hoc_vi, hpgv.sdt, hpgv.email, hpgv.vai_tro, hpgv.don_vi,
-                   gv.hoc_vi AS gv_hoc_vi, gv.sdt AS gv_sdt, gv.email AS gv_email
+                   gv.hoc_vi AS gv_hoc_vi, gv.sdt AS gv_sdt, gv.email AS gv_email,
+                   gv.ma_can_bo, gv.gioi_tinh, gv.chuc_vu, gv.dia_chi
             FROM hp_giang_vien hpgv
             LEFT JOIN giang_vien gv ON hpgv.gv_id = gv.id
             WHERE hpgv.hp_id=? ORDER BY hpgv.thu_tu
@@ -101,6 +102,16 @@ class TemplateEngine:
                 'Unit'  : r['don_vi'] or '',
                 'Role'  : 'Phụ trách chính' if r['vai_tro'] == 'phu_trach' else 'Tham gia giảng dạy',
                 'RoleKey': r['vai_tro'] or '',
+                'StaffCode': r['ma_can_bo'] or '',
+                'Gender' : r['gioi_tinh'] or '',
+                'Position': r['chuc_vu'] or '',
+                'Address': r['dia_chi'] or '',
+                # Compatibility for Word Builders
+                'hoc_ham_vi_ten': f"{r['hoc_vi'] or r['gv_hoc_vi'] or ''} {r['ho_ten'] or ''}".strip(),
+                'ma_can_bo': r['ma_can_bo'] or '',
+                'chuc_vu': r['chuc_vu'] or '',
+                'sdt': r['sdt'] or r['gv_sdt'] or '',
+                'email': r['email'] or r['gv_email'] or '',
             }
             for r in gv_rows
         ]
@@ -281,6 +292,7 @@ class TemplateEngine:
             'HoursLT'           : hp.get('gio_lt') or 0,
             'HoursBT'           : hp.get('gio_bt') or 0,
             'HoursTH'           : hp.get('gio_th_tn') or 0,
+            'HoursBTTH'         : hp.get('gio_bt_th') or 0,
             'HoursTL'           : hp.get('gio_tl') or 0,
             'HoursTuHoc'        : hp.get('gio_tu_hoc') or 0,
             'HoursKT'           : hp.get('gio_kt') or 0,
@@ -325,6 +337,8 @@ class TemplateEngine:
             'MainLecturer'      : main_lect,
             'LecturerMain'      : [l for l in lecturers if l['RoleKey'] == 'phu_trach'],
             'LecturerTeam'      : [l for l in lecturers if l['RoleKey'] != 'phu_trach'],
+            'giang_vien_chinh'   : [l for l in lecturers if l['RoleKey'] == 'phu_trach'],
+            'giang_vien_tham_gia': [l for l in lecturers if l['RoleKey'] != 'phu_trach'],
 
             # ── Mục tiêu ─────────────────────────────────────────────────────
             'Objectives'        : objectives,
@@ -416,77 +430,103 @@ class TemplateEngine:
         """
         return [
             # Scalar fields
-            {'key': 'CourseName',      'type': 'text',    'example': 'Lập trình Python', 'group': '1. Thông tin chung'},
-            {'key': 'CourseNameEN',    'type': 'text',    'example': 'Python Programming', 'group': '1. Thông tin chung'},
-            {'key': 'CourseCode',      'type': 'text',    'example': 'IT3010', 'group': '1. Thông tin chung'},
-            {'key': 'Credits',         'type': 'number',  'example': '3', 'group': '1. Thông tin chung'},
-            {'key': 'Department',      'type': 'text',    'example': 'Khoa CNTT', 'group': '1. Thông tin chung'},
-            {'key': 'ManageUnit',      'type': 'text',    'example': 'Bộ môn KHMT', 'group': '1. Thông tin chung'},
-            {'key': 'Level',           'type': 'text',    'example': 'Đại học', 'group': '1. Thông tin chung'},
-            {'key': 'CourseType',      'type': 'text',    'example': 'Bắt buộc', 'group': '1. Thông tin chung'},
-            {'key': 'CourseNature',    'type': 'text',    'example': 'Lý thuyết', 'group': '1. Thông tin chung'},
-            {'key': 'TotalHours',      'type': 'number',  'example': '45', 'group': '1. Thông tin chung'},
-            {'key': 'HoursLT',         'type': 'number',  'example': '15', 'group': '1. Thông tin chung'},
-            {'key': 'HoursBT',         'type': 'number',  'example': '0', 'group': '1. Thông tin chung'},
-            {'key': 'HoursTH',         'type': 'number',  'example': '30', 'group': '1. Thông tin chung'},
-            {'key': 'HoursTL',         'type': 'number',  'example': '0', 'group': '1. Thông tin chung'},
-            {'key': 'HoursTuHoc',      'type': 'number',  'example': '90', 'group': '1. Thông tin chung'},
-            {'key': 'HoursKT',         'type': 'number',  'example': '0', 'group': '1. Thông tin chung'},
-            {'key': 'HoursTieuLuan',   'type': 'number',  'example': '0', 'group': '1. Thông tin chung'},
-            {'key': 'HoursThucTap',    'type': 'number',  'example': '0', 'group': '1. Thông tin chung'},
-            {'key': 'Description',     'type': 'text',    'example': 'Mô tả học phần...', 'group': '2. Mô tả & Mục tiêu'},
-            {'key': 'Major',           'type': 'text',    'example': 'Công nghệ thông tin', 'group': '1. Thông tin chung'},
-            {'key': 'Specialization',  'type': 'text',    'example': 'Công nghệ phần mềm', 'group': '1. Thông tin chung'},
-            {'key': 'KnowledgeBlock',  'type': 'text',    'example': 'Cơ sở ngành', 'group': '1. Thông tin chung'},
-            {'key': 'TeachingMethods', 'type': 'text',    'example': 'Thuyết giảng, Vấn đáp', 'group': '1. Thông tin chung'},
-            {'key': 'TaskInClass',     'type': 'text',    'example': 'Tham gia 80% số tiết', 'group': 'Nhiệm vụ & Quy định'},
-            {'key': 'TaskHomework',    'type': 'text',    'example': 'Làm BTL đúng hạn', 'group': 'Nhiệm vụ & Quy định'},
-            {'key': 'TaskEquipment',   'type': 'text',    'example': 'Có laptop cá nhân', 'group': 'Nhiệm vụ & Quy định'},
-            {'key': 'TaskOther',       'type': 'text',    'example': 'Các nhiệm vụ khác', 'group': 'Nhiệm vụ & Quy định'},
-            {'key': 'CourseRules',     'type': 'text',    'example': 'Quy định...', 'group': 'Nhiệm vụ & Quy định'},
-            {'key': 'SignPlace',       'type': 'text',    'example': 'Hà Nội', 'group': 'Hệ thống - Ký duyệt'},
-            {'key': 'SignDate',        'type': 'date',    'example': 'Ngày 01 tháng 01...', 'group': 'Hệ thống - Ký duyệt'},
-            {'key': 'SignTitleLeft',   'type': 'text',    'example': 'TRƯỞNG BỘ MÔN', 'group': 'Hệ thống - Ký duyệt'},
-            {'key': 'SignNameLeft',    'type': 'text',    'example': 'Nguyễn Văn A', 'group': 'Hệ thống - Ký duyệt'},
-            {'key': 'SignTitleRight',  'type': 'text',    'example': 'TRƯỞNG KHOA', 'group': 'Hệ thống - Ký duyệt'},
-            {'key': 'SignNameRight',   'type': 'text',    'example': 'Trần Thị B', 'group': 'Hệ thống - Ký duyệt'},
-            {'key': 'Today',           'type': 'date',    'example': '17/04/2026', 'group': 'Hệ thống'},
-            {'key': 'Year',            'type': 'number',  'example': '2026', 'group': 'Hệ thống'},
-            {'key': 'PrereqCourse',    'type': 'text',    'example': 'IT3010 - Lập trình Python', 'group': '1. Thông tin chung'},
-            {'key': 'PrereqCourseCode','type': 'text',    'example': 'IT3010', 'group': '1. Thông tin chung'},
-            {'key': 'PrereqCourseName','type': 'text',    'example': 'Lập trình Python', 'group': '1. Thông tin chung'},
-            {'key': 'CoReqCourse',     'type': 'text',    'example': 'Không có', 'group': '1. Thông tin chung'},
-            {'key': 'CoReqCourseCode', 'type': 'text',    'example': 'Không có', 'group': '1. Thông tin chung'},
-            {'key': 'CoReqCourseName', 'type': 'text',    'example': 'Không có', 'group': '1. Thông tin chung'},
-            {'key': 'SubstituteCourse','type': 'text',    'example': 'IT2020 - Cơ sở dữ liệu', 'group': '1. Thông tin chung'},
-            {'key': 'SubstituteCourseCode','type': 'text', 'example': 'IT2020', 'group': '1. Thông tin chung'},
-            {'key': 'SubstituteCourseName','type': 'text', 'example': 'Cơ sở dữ liệu', 'group': '1. Thông tin chung'},
-            # Lists (dùng với {% for %}...{% endfor %})
-            {'key': 'PrereqCourses',   'type': 'list[Code,Name]', 'example': 'for c in PrereqCourses', 'group': '1. Thông tin chung'},
-            {'key': 'CoReqCourses',    'type': 'list[Code,Name]', 'example': 'for c in CoReqCourses', 'group': '1. Thông tin chung'},
-            {'key': 'SubstituteCourses','type': 'list[Code,Name]', 'example': 'for c in SubstituteCourses', 'group': '1. Thông tin chung'},
-            {'key': 'Programs',        'type': 'list[bac,ten_ctdt,khoi,cn]', 'example': 'for p in Programs', 'group': '1. Thông tin chung'},
-            {'key': 'Lecturers',       'type': 'list[Name,Degree,Role]', 'example': 'for lect in Lecturers', 'group': '1. Thông tin chung'},
-            {'key': 'LecturerMain',    'type': 'list[Name,Degree,Role]', 'example': 'for lect in LecturerMain', 'group': '1. Thông tin chung'},
-            {'key': 'LecturerTeam',    'type': 'list[Name,Degree,Role]', 'example': 'for lect in LecturerTeam', 'group': '1. Thông tin chung'},
-            {'key': 'CLOs',            'type': 'list[Code,Desc,PLO,Level]', 'example': 'for clo in CLOs', 'group': '3. CLO'},
-            {'key': 'Objectives',      'type': 'list[No,Desc,PLO]', 'example': 'for obj in Objectives', 'group': '2. Mô tả & Mục tiêu'},
-            {'key': 'MainRefs',        'type': 'list[noi_dung]', 'example': 'for r in MainRefs', 'group': '5. Cơ sở vật chất'},
-            {'key': 'SupRefs',         'type': 'list[noi_dung]', 'example': 'for r in SupRefs', 'group': '5. Cơ sở vật chất'},
-            {'key': 'OtherRefs',       'type': 'list[noi_dung]', 'example': 'for r in OtherRefs', 'group': '5. Cơ sở vật chất'},
-            {'key': 'PhongHoc',        'type': 'list[noi_dung]', 'example': 'for p in PhongHoc', 'group': '5. Cơ sở vật chất'},
-            {'key': 'ThietBiHoTro',    'type': 'list[noi_dung]', 'example': 'for t in ThietBiHoTro', 'group': '5. Cơ sở vật chất'},
-            {'key': 'ThietBiThucHanh', 'type': 'list[noi_dung]', 'example': 'for th in ThietBiThucHanh', 'group': '5. Cơ sở vật chất'},
-            {'key': 'NgoaiKhoa',       'type': 'list[noi_dung]', 'example': 'for nk in NgoaiKhoa', 'group': '5. Cơ sở vật chất'},
-            {'key': 'ContentLT',       'type': 'list[ten,gio_lt,pp_day]', 'example': 'for nd in ContentLT', 'group': '5. Nội dung học phần'},
-            {'key': 'ContentTH',       'type': 'list[ten,gio_th,pp_day]', 'example': 'for nd in ContentTH', 'group': '5. Nội dung học phần'},
-            {'key': 'AssessmentRows',  'type': 'list[nhom,noi_dung,hinh_thuc,ty_trong]', 'example': 'for r in AssessmentRows', 'group': '6. Đánh giá'},
-            {'key': 'Rubrics',         'type': 'list[ten,ky_hieu,Criteria]', 'example': 'for rb in Rubrics', 'group': '6. Đánh giá'},
-            {'key': 'History',         'type': 'list[lan,noi_dung,ngay_cap_nhat]', 'example': 'for h in History', 'group': '7. Lịch sử'},
-            {'key': 'Policies',        'type': 'list[loai_chinh_sach,noi_dung]', 'example': 'for p in Policies', 'group': '8. Chính sách'},
-            {'key': 'Checklists',      'type': 'list[hang_muc,trang_thai]', 'example': 'for c in Checklists', 'group': '9. Tự kiểm tra'},
+            {'key': 'CourseName',      'type': 'text',    'example': '{{ CourseName }}', 'group': '1. Thông tin chung'},
+            {'key': 'CourseNameEN',    'type': 'text',    'example': '{{ CourseNameEN }}', 'group': '1. Thông tin chung'},
+            {'key': 'CourseCode',      'type': 'text',    'example': '{{ CourseCode }}', 'group': '1. Thông tin chung'},
+            {'key': 'Credits',         'type': 'number',  'example': '{{ Credits }}', 'group': '1. Thông tin chung'},
+            {'key': 'Department',      'type': 'text',    'example': '{{ Department }}', 'group': '1. Thông tin chung'},
+            {'key': 'ManageUnit',      'type': 'text',    'example': '{{ ManageUnit }}', 'group': '1. Thông tin chung'},
+            {'key': 'Level',           'type': 'text',    'example': '{{ Level }}', 'group': '1. Thông tin chung'},
+            {'key': 'CourseType',      'type': 'text',    'example': '{{ CourseType }}', 'group': '1. Thông tin chung'},
+            {'key': 'CourseNature',    'type': 'text',    'example': '{{ CourseNature }}', 'group': '1. Thông tin chung'},
+            {'key': 'TotalHours',      'type': 'number',  'example': '{{ TotalHours }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursLT',         'type': 'number',  'example': '{{ HoursLT }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursBT',         'type': 'number',  'example': '{{ HoursBT }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursTH',         'type': 'number',  'example': '{{ HoursTH }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursBTTH',       'type': 'number',  'example': '{{ HoursBTTH }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursTL',         'type': 'number',  'example': '{{ HoursTL }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursTuHoc',      'type': 'number',  'example': '{{ HoursTuHoc }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursKT',         'type': 'number',  'example': '{{ HoursKT }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursTieuLuan',   'type': 'number',  'example': '{{ HoursTieuLuan }}', 'group': '1. Thông tin chung'},
+            {'key': 'HoursThucTap',    'type': 'number',  'example': '{{ HoursThucTap }}', 'group': '1. Thông tin chung'},
+            {'key': 'TotalLTHours',    'type': 'number',  'example': '{{ TotalLTHours }}', 'group': '1. Thông tin chung'},
+            {'key': 'TotalBTHours',    'type': 'number',  'example': '{{ TotalBTHours }}', 'group': '1. Thông tin chung'},
+            {'key': 'TotalTHHours',    'type': 'number',  'example': '{{ TotalTHHours }}', 'group': '1. Thông tin chung'},
+            {'key': 'Description',     'type': 'text',    'example': '{{ Description }}', 'group': '2. Mô tả & Mục tiêu'},
+            {'key': 'Status',          'type': 'text',    'example': '{{ Status }}', 'group': 'Hệ thống'},
+            {'key': 'Major',           'type': 'text',    'example': '{{ Major }}', 'group': '1. Thông tin chung'},
+            {'key': 'Specialization',  'type': 'text',    'example': '{{ Specialization }}', 'group': '1. Thông tin chung'},
+            {'key': 'KnowledgeBlock',  'type': 'text',    'example': '{{ KnowledgeBlock }}', 'group': '1. Thông tin chung'},
+            {'key': 'TeachingMethods', 'type': 'text',    'example': '{{ TeachingMethods }}', 'group': '1. Thông tin chung'},
+            
+            {'key': 'TaskInClass',     'type': 'text',    'example': '{{ TaskInClass }}', 'group': 'Nhiệm vụ & Quy định'},
+            {'key': 'TaskAttend',      'type': 'text',    'example': '{{ TaskAttend }}', 'group': 'Nhiệm vụ & Quy định'},
+            {'key': 'TaskHomework',    'type': 'text',    'example': '{{ TaskHomework }}', 'group': 'Nhiệm vụ & Quy định'},
+            {'key': 'TaskEquipment',   'type': 'text',    'example': '{{ TaskEquipment }}', 'group': 'Nhiệm vụ & Quy định'},
+            {'key': 'TaskTools',       'type': 'text',    'example': '{{ TaskTools }}', 'group': 'Nhiệm vụ & Quy định'},
+            {'key': 'TaskOther',       'type': 'text',    'example': '{{ TaskOther }}', 'group': 'Nhiệm vụ & Quy định'},
+            {'key': 'CourseRules',     'type': 'text',    'example': '{{ CourseRules }}', 'group': 'Nhiệm vụ & Quy định'},
+            {'key': 'Facilities',      'type': 'text',    'example': '{{ Facilities }}', 'group': '5. Cơ sở vật chất'},
+            {'key': 'Appendix',        'type': 'text',    'example': '{{ Appendix }}', 'group': '9. Khác'},
+            
+            {'key': 'SignPlace',       'type': 'text',    'example': '{{ SignPlace }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignDate',        'type': 'date',    'example': '{{ SignDate }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignTitleLeft',   'type': 'text',    'example': '{{ SignTitleLeft }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignNameLeft',    'type': 'text',    'example': '{{ SignNameLeft }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignTitleRight',  'type': 'text',    'example': '{{ SignTitleRight }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignNameRight',   'type': 'text',    'example': '{{ SignNameRight }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignerLeftTitle', 'type': 'text',    'example': '{{ SignerLeftTitle }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignerLeftName',  'type': 'text',    'example': '{{ SignerLeftName }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignerRightTitle','type': 'text',    'example': '{{ SignerRightTitle }}', 'group': 'Hệ thống - Ký duyệt'},
+            {'key': 'SignerRightName', 'type': 'text',    'example': '{{ SignerRightName }}', 'group': 'Hệ thống - Ký duyệt'},
+            
+            {'key': 'Today',           'type': 'date',    'example': '{{ Today }}', 'group': 'Hệ thống'},
+            {'key': 'Year',            'type': 'number',  'example': '{{ Year }}', 'group': 'Hệ thống'},
+            {'key': 'HpId',            'type': 'number',  'example': '{{ HpId }}', 'group': 'Hệ thống'},
+            
+            {'key': 'PrereqCourse',    'type': 'text',    'example': '{{ PrereqCourse }}', 'group': '1. Thông tin chung'},
+            {'key': 'PrereqCourseCode','type': 'text',    'example': '{{ PrereqCourseCode }}', 'group': '1. Thông tin chung'},
+            {'key': 'PrereqCourseName','type': 'text',    'example': '{{ PrereqCourseName }}', 'group': '1. Thông tin chung'},
+            {'key': 'CoReqCourse',     'type': 'text',    'example': '{{ CoReqCourse }}', 'group': '1. Thông tin chung'},
+            {'key': 'CoReqCourseCode', 'type': 'text',    'example': '{{ CoReqCourseCode }}', 'group': '1. Thông tin chung'},
+            {'key': 'CoReqCourseName', 'type': 'text',    'example': '{{ CoReqCourseName }}', 'group': '1. Thông tin chung'},
+            {'key': 'SubstituteCourse','type': 'text',    'example': '{{ SubstituteCourse }}', 'group': '1. Thông tin chung'},
+            {'key': 'SubstituteCourseCode','type': 'text', 'example': '{{ SubstituteCourseCode }}', 'group': '1. Thông tin chung'},
+            {'key': 'SubstituteCourseName','type': 'text', 'example': '{{ SubstituteCourseName }}', 'group': '1. Thông tin chung'},
+            
+            # Lists
+            {'key': 'Lecturers',       'type': 'list',    'example': '{{ Name, Degree, Role, StaffCode, Phone, Email }}', 'group': '1. Thông tin chung'},
+            {'key': 'MainLecturer',    'type': 'dict',    'example': '{{ MainLecturer.Name }}', 'group': '1. Thông tin chung'},
+            {'key': 'LecturerMain',    'type': 'list',    'example': '{% for l in LecturerMain %}', 'group': '1. Thông tin chung'},
+            {'key': 'LecturerTeam',    'type': 'list',    'example': '{% for l in LecturerTeam %}', 'group': '1. Thông tin chung'},
+            
+            {'key': 'CLOs',            'type': 'list',    'example': '{{ Code, Desc, PLO, Level }}', 'group': '3. CLO'},
+            {'key': 'CLOCount',        'type': 'number',  'example': '{{ CLOCount }}', 'group': '3. CLO'},
+            {'key': 'Objectives',      'type': 'list',    'example': '{{ No, Desc, PLO }}', 'group': '2. Mô tả & Mục tiêu'},
+            
+            {'key': 'MainRefs',        'type': 'list',    'example': '{{ noi_dung }}', 'group': '5. Cơ sở vật chất'},
+            {'key': 'SupRefs',         'type': 'list',    'example': '{{ noi_dung }}', 'group': '5. Cơ sở vật chất'},
+            {'key': 'OtherRefs',       'type': 'list',    'example': '{{ noi_dung }}', 'group': '5. Cơ sở vật chất'},
+            {'key': 'AllRefs',         'type': 'list',    'example': '{{ noi_dung, loai }}', 'group': '5. Cơ sở vật chất'},
+            
+            {'key': 'ContentLT',       'type': 'list',    'example': '{{ ten, gio_lt, pp_day }}', 'group': '5. Nội dung học phần'},
+            {'key': 'ContentTH',       'type': 'list',    'example': '{{ ten, gio_th, pp_day }}', 'group': '5. Nội dung học phần'},
+            
+            {'key': 'AssessmentRows',  'type': 'list',    'example': '{{ nhom, noi_dung, hinh_thuc, ty_trong }}', 'group': '6. Đánh giá'},
+            {'key': 'AssessmentGroups','type': 'dict',    'example': '{% for k, g in AssessmentGroups.items() %}', 'group': '6. Đánh giá'},
+            {'key': 'Rubrics',         'type': 'list',    'example': '{{ ten, ky_hieu, Criteria }}', 'group': '6. Đánh giá'},
+            
+            {'key': 'History',         'type': 'list',    'example': '{{ lan, noi_dung, ngay_cap_nhat }}', 'group': '7. Lịch sử'},
+            {'key': 'Policies',        'type': 'list',    'example': '{{ loai_chinh_sach, noi_dung }}', 'group': '8. Chính sách'},
+            {'key': 'Checklists',      'type': 'list',    'example': '{{ hang_muc, trang_thai }}', 'group': '9. Tự kiểm tra'},
             {'key': 'IsPhD',           'type': 'boolean', 'example': '{% if IsPhD %}', 'group': '1. Thông tin chung'},
+            
+            # Note for dynamic fields
+            {'key': 'extra_*',         'type': 'dynamic', 'example': 'Tùy biến theo Schema ĐCCTHP', 'group': '10. Trường mở rộng'},
         ]
+
+
+
 
     def validate_template(self, template_path: str) -> dict:
         """
@@ -646,9 +686,10 @@ class TemplateService:
         default = self.get_default()
         if default:
             return self.export_with_template(hp_id, default['id'], output_path)
-        # Fallback về engine builtin (word_export.py)
-        from word_export import export_de_cuong
-        return export_de_cuong(self.db, hp_id, output_path)
+        # Fallback về engine builtin (word_export_service)
+        from services.word_export_service import export_dccthp
+        data = self.engine.build_context(hp_id)
+        return export_dccthp(data, output_path)
 
     def validate_template_file(self, template_path: str) -> dict:
         """Validate trực tiếp từ đường dẫn."""

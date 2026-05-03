@@ -68,10 +68,10 @@ class Sec11DoiNgu(BaseSection):
         tb.Button(toolbar, text='⬇ Xuống',     command=lambda: self._move(1)).pack(side='left', padx=2)
 
         # Treeview
-        cols   = ('stt', 'vai_tro', 'ho_ten', 'don_vi', 'sdt', 'email')
-        heads  = ('TT', 'Vai trò', 'Học hàm, Học vị, Họ và tên', 'Đơn vị công tác', 'Số ĐT', 'Email')
-        widths = (40, 140, 250, 180, 120, 180)
-        aligns = ('center', 'w', 'w', 'w', 'center', 'center')
+        cols   = ('stt', 'ma_can_bo', 'vai_tro', 'ho_ten', 'chuc_vu', 'don_vi', 'sdt', 'email')
+        heads  = ('TT', 'Mã CB', 'Vai trò', 'Học hàm/vị, Họ tên', 'Chức vụ', 'Đơn vị', 'Số ĐT', 'Email')
+        widths = (40, 80, 120, 220, 120, 150, 100, 150)
+        aligns = ('center', 'center', 'w', 'w', 'w', 'w', 'center', 'center')
         
         tf, self.tree = make_tree(frm, cols, heads, widths, height=15, column_aligns=aligns, db=self.db, table_id='sec11_gv')
         tf.pack(fill='both', expand=True)
@@ -84,6 +84,7 @@ class Sec11DoiNgu(BaseSection):
         ).fetchall()
         self._rows = [dict(r) for r in rows]
         self._refresh(self._rows)
+        self._loading = False
 
     def save(self):
         if self.hp_id is not None:
@@ -101,18 +102,23 @@ class Sec11DoiNgu(BaseSection):
             tag = 'even' if i % 2 == 0 else 'odd'
             vt = 'Chính' if r.get('vai_tro') == 'phu_trach' else 'Tham gia'
             self.tree.insert('', 'end', iid=str(i),
-                             values=(i+1, vt, f"{r.get('hoc_ham_vi','') or ''} {r.get('ho_ten','') or ''}".strip(),
-                                     r.get('don_vi',''), r.get('sdt',''), r.get('email','')),
+                             values=(i+1, r.get('ma_can_bo', '') or '', vt, 
+                                     f"{r.get('hoc_ham_vi','') or ''} {r.get('ho_ten','') or ''}".strip(),
+                                     r.get('chuc_vu',''), r.get('don_vi',''), r.get('sdt',''), r.get('email','')),
                              tags=(tag,))
 
     def _fields(self):
         return [
             ('vai_tro',    'Vai trò',      'combo', {'values': ['Giảng viên phụ trách', 'Giảng viên tham gia']}),
+            ('ma_can_bo',  'Mã cán bộ',    'entry', {}),
             ('ho_ten',     'Họ và tên',    'entry', {}),
+            ('gioi_tinh',  'Giới tính',    'combo', {'values': ['Nam', 'Nữ', 'Khác']}),
             ('hoc_ham_vi', 'Học hàm/vị',   'entry', {}),
+            ('chuc_vu',    'Chức vụ',      'entry', {}),
             ('don_vi',     'Đơn vị',       'entry', {}),
             ('sdt',        'Số ĐT',        'entry', {}),
             ('email',      'Email',        'entry', {}),
+            ('dia_chi',    'Địa chỉ',      'entry', {}),
         ]
 
     def _add(self):
@@ -185,6 +191,10 @@ class Sec11DoiNgu(BaseSection):
                     'don_vi': gv.get('don_vi') or '',
                     'email': gv.get('email') or '',
                     'sdt': gv.get('sdt') or '',
+                    'ma_can_bo': gv.get('ma_can_bo') or '',
+                    'gioi_tinh': gv.get('gioi_tinh') or '',
+                    'chuc_vu': gv.get('chuc_vu') or '',
+                    'dia_chi': gv.get('dia_chi') or '',
                     'vai_tro': dlg.vai_tro
                 })
             self._refresh(self._rows)
@@ -211,9 +221,9 @@ class _GvPickDialog(tb.Toplevel):
                   font=('Arial', 10)).pack(fill='x', pady=4)
 
         from sections.base_section import make_tree
-        cols = ('ho_ten', 'hoc_vi', 'sdt', 'email')
-        heads = ('Họ và tên', 'Học vị', 'SĐT', 'Email')
-        widths = (250, 120, 120, 250)
+        cols = ('ma_can_bo', 'ho_ten', 'hoc_vi', 'sdt', 'email')
+        heads = ('Mã CB', 'Họ và tên', 'Học vị', 'SĐT', 'Email')
+        widths = (80, 200, 80, 100, 200)
         tf, self.tree = make_tree(frm, cols, heads, widths, height=15, db=self.db, table_id='sec11_gv_pick')
         self.tree.configure(selectmode='extended')
         tf.pack(fill='both', expand=True)
@@ -240,7 +250,7 @@ class _GvPickDialog(tb.Toplevel):
         for i, g in enumerate(gvs):
             tag = 'even' if i % 2 == 0 else 'odd'
             self.tree.insert('', 'end', iid=str(i),
-                             values=(g.get('ho_ten',''), g.get('hoc_vi') or '', g.get('sdt') or '',
+                             values=(g.get('ma_can_bo','') or '', g.get('ho_ten',''), g.get('hoc_vi') or '', g.get('sdt') or '',
                                      g.get('email') or ''), tags=(tag,))
 
     def _filter(self):

@@ -37,6 +37,7 @@ class Sec12PhuLuc(BaseSection):
         self.txt.delete('1.0', 'end')
         val = hp['phu_luc'] if hp and 'phu_luc' in hp and hp['phu_luc'] else ''
         self.txt.insert('1.0', val)
+        self._loading = False
 
     def save(self):
         if self.hp_id is not None:

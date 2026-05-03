@@ -39,6 +39,7 @@ class Sec9QuyDinh(BaseSection):
         self.txt.configure(yscrollcommand=vsb.set)
         self.txt.pack(side='left', fill='both', expand=True)
         vsb.pack(side='right', fill='y')
+        self.txt.bind('<KeyRelease>', lambda _: self.mark_modified())
 
     def load(self, hp_id):
         super().load(hp_id)
@@ -46,6 +47,7 @@ class Sec9QuyDinh(BaseSection):
         self.txt.delete('1.0', 'end')
         val = hp['quy_dinh_hp'] if hp and 'quy_dinh_hp' in hp and hp['quy_dinh_hp'] else ''
         self.txt.insert('1.0', val)
+        self._loading = False
 
     def save(self):
         if self.hp_id is not None:
@@ -67,3 +69,4 @@ class Sec9QuyDinh(BaseSection):
                 return
         self.txt.delete('1.0', 'end')
         self.txt.insert('1.0', suggestion)
+        self.mark_modified()

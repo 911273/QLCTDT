@@ -28,7 +28,7 @@ class HeaderBuilder:
         gv_tham_gia = data.get('giang_vien_tham_gia', [])
 
         total_rows = 1 + len(gv_chinh) + (1 + len(gv_tham_gia) if gv_tham_gia else 0)
-        table = doc.add_table(rows=total_rows, cols=4)
+        table = doc.add_table(rows=total_rows, cols=6)
         set_table_style(table)
 
         # Build Title: Giảng viên phụ trách chính
@@ -36,7 +36,7 @@ class HeaderBuilder:
         r_chinh = table.rows[row_idx]
         apply_cell_style(r_chinh.cells[0], bold=True, bg_color=COLOR_HEADER_BG)
         # merge to end
-        r_chinh.cells[0].merge(r_chinh.cells[3])
+        r_chinh.cells[0].merge(r_chinh.cells[5])
         r_chinh.cells[0].text = "Giảng viên phụ trách chính"
         
         row_idx += 1
@@ -44,15 +44,17 @@ class HeaderBuilder:
             row = table.rows[row_idx]
             row.cells[0].text = str(gv.get('tt', i+1))
             row.cells[1].text = gv.get('hoc_ham_vi_ten', '')
-            row.cells[2].text = gv.get('sdt', '')
-            row.cells[3].text = gv.get('email', '')
+            row.cells[2].text = gv.get('ma_can_bo', '')
+            row.cells[3].text = gv.get('chuc_vu', '')
+            row.cells[4].text = gv.get('sdt', '')
+            row.cells[5].text = gv.get('email', '')
             apply_cell_style(row.cells[0], center=True)
             row_idx += 1
 
         if gv_tham_gia:
             r_tg = table.rows[row_idx]
             apply_cell_style(r_tg.cells[0], bold=True, bg_color=COLOR_HEADER_BG)
-            r_tg.cells[0].merge(r_tg.cells[3])
+            r_tg.cells[0].merge(r_tg.cells[5])
             r_tg.cells[0].text = "Giảng viên tham gia giảng dạy"
             
             row_idx += 1
@@ -60,8 +62,10 @@ class HeaderBuilder:
                 row = table.rows[row_idx]
                 row.cells[0].text = str(gv.get('tt', i+1))
                 row.cells[1].text = gv.get('hoc_ham_vi_ten', '')
-                row.cells[2].text = gv.get('sdt', '')
-                row.cells[3].text = gv.get('email', '')
+                row.cells[2].text = gv.get('ma_can_bo', '')
+                row.cells[3].text = gv.get('chuc_vu', '')
+                row.cells[4].text = gv.get('sdt', '')
+                row.cells[5].text = gv.get('email', '')
                 apply_cell_style(row.cells[0], center=True)
                 row_idx += 1
 

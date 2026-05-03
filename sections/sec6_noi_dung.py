@@ -39,6 +39,11 @@ class Sec6NoiDung(BaseSection):
         self._th_tab = _NoiDungTab(nb, 'th', self.db, sec_parent=self)
         nb.add(self._th_tab, text='6.2 Phần Thực hành')
 
+    def refresh_labels(self):
+        """Cập nhật lại các nhãn cho các tab con."""
+        if self._lt_tab: self._lt_tab.refresh_labels()
+        if self._th_tab: self._th_tab.refresh_labels()
+
     def load(self, hp_id):
         super().load(hp_id)
         hp = self.db.get_hoc_phan(hp_id)
@@ -52,7 +57,10 @@ class Sec6NoiDung(BaseSection):
         
         # Lấy danh sách CLO cho picker (chỉ lấy CLO thực, bỏ qua tiêu đề nhóm)
         clos = self.db.get_clo(hp_id)
-        self.clo_list = [r['ma'] for r in clos if not r['la_tieu_de_nhom'] and r['ma']]
+        from utils.data_utils import natural_sort_key
+        raw_clos = [r['ma'] for r in clos if not r['la_tieu_de_nhom'] and r['ma']]
+        raw_clos.sort(key=natural_sort_key)
+        self.clo_list = raw_clos
         
         is_phd = hp and hp.get('nhom_hp_dac_thu') == 'Chuyên đề Tiến sĩ'
         self._lt_tab.set_phd_mode(is_phd)
@@ -60,6 +68,7 @@ class Sec6NoiDung(BaseSection):
         
         self._lt_tab.load_rows([dict(r) for r in rows_lt])
         self._th_tab.load_rows([dict(r) for r in rows_th])
+        self._loading = False
 
     def save(self):
         if self.hp_id is None:
@@ -113,31 +122,36 @@ class _NoiDungTab(tb.Frame):
         self.phan = phan
         self.db = db
         self.sec_parent = sec_parent
-        
-        cols   = self.LT_COLS   if phan == 'lt' else self.TH_COLS
-        heads  = self.LT_HEADS  if phan == 'lt' else self.TH_HEADS
-        widths = self.LT_WIDTHS if phan == 'lt' else self.TH_WIDTHS
+        self.tree = None
         self._flat = []   # list of dicts (flat, with temp_id for tree building)
         self.is_phd = False
+        
+        # 1. Prepare Column Config
+        abbr_clo = self.db.get_config('abbr_clo', 'CLO')
+        lt_heads = list(self.LT_HEADS)
+        lt_heads[5] = f'CĐR ({abbr_clo})'
+        th_heads = list(self.TH_HEADS)
+        th_heads[5] = f'CĐR ({abbr_clo})'
 
-        # ── Treeview ─────────────────────────────────────────────────────────
+        cols   = self.LT_COLS   if phan == 'lt' else self.TH_COLS
+        heads  = lt_heads       if phan == 'lt' else th_heads
+        widths = self.LT_WIDTHS if phan == 'lt' else self.TH_WIDTHS
+
+        # 2. Build Treeview
         tree_frm = tb.Frame(self)
         tree_frm.pack(fill='both', expand=True)
 
         tf, self.tree = make_tree(tree_frm, cols, heads, widths, height=18, db=self.db, table_id=f'sec6_{phan}')
         tf.pack(fill='both', expand=True)
         
-        # First col = tree column (hierarchical indent)
         self.tree.column('#0', width=20, minwidth=20, stretch=True)
         self.tree.heading('#0', text='')
         
-        # Cấu hình lại lề cho các cột đặc thù (Nội dung và Yêu cầu)
         for i, col in enumerate(cols):
             if i in (0, 6): # 'Nội dung' and 'Yêu cầu SV chuẩn bị'
                 self.tree.heading(col, anchor='w')
                 self.tree.column(col, anchor='w')
 
-        # Tags are now globally defined in MyTree.Treeview, but we can override if needed
         self.tree.tag_configure('test', foreground=CLR_ACCENT, font=('Arial', 10, 'bold', 'italic'))
         self.tree.tag_configure('total', background=CLR_PRIMARY, foreground='white', font=('Arial', 10, 'bold'))
         self.tree.bind('<Double-1>', lambda _e: self._edit())
@@ -153,7 +167,7 @@ class _NoiDungTab(tb.Frame):
         self.tree.bind('<B1-Motion>', self._on_drag_motion)
         self.tree.bind('<ButtonRelease-1>', self._on_drag_drop)
 
-        # ── Toolbar ──────────────────────────────────────────────────────────
+        # 3. Build Toolbar
         toolbar_frm = tb.Frame(self)
         toolbar_frm.pack(fill='x', pady=(4, 0))
 
@@ -174,7 +188,6 @@ class _NoiDungTab(tb.Frame):
         tb.Button(toolbar_frm, text='⬇ Xuống',
                    command=lambda: self._move(1)).pack(side='left', padx=2)
         
-        tb.Separator(toolbar_frm, orient='vertical').pack(side='left', padx=6, fill='y')
         tb.Button(toolbar_frm, text='📥 Nhập từ Excel', style='Accent.TButton',
                    command=self._import_excel).pack(side='left', padx=2)
         tb.Separator(toolbar_frm, orient='vertical').pack(side='left', padx=6, fill='y')
@@ -184,6 +197,12 @@ class _NoiDungTab(tb.Frame):
         
         self.lbl_diff = tb.Label(toolbar_frm, text='', font=('Arial', 10, 'italic'))
         self.lbl_diff.pack(side='left', padx=20)
+
+    def refresh_labels(self):
+        """Cập nhật lại các nhãn khi cấu hình viết tắt thay đổi."""
+        abbr_clo = self.db.get_config('abbr_clo', 'CLO')
+        if hasattr(self, 'tree') and self.tree:
+            self.tree.heading('cdr_ma', text=f'CĐR ({abbr_clo})')
         
     def set_phd_mode(self, is_phd):
         self.is_phd = is_phd
@@ -424,7 +443,7 @@ class _NoiDungTab(tb.Frame):
                     gio_str,
                     r.get('nhiem_vu_ncs') or '',
                     r.get('pp_day') or '', r.get('pp_hoc') or '',
-                    r.get('cdr_ma') or '', r.get('bai_danh_gia') or '')
+                    self.sec_parent.extract_codes(r.get('cdr_ma') or ''), r.get('bai_danh_gia') or '')
         else:
             indent = '  ' * max(0, r.get('cap_do', 1) - 1)
             gio_str = f"({r.get('gio_th') or 0:g}/{r.get('gio_bt') or 0:g}/{r.get('gio_tl') or 0:g}/{r.get('gio_kt') or 0:g})"
@@ -432,7 +451,7 @@ class _NoiDungTab(tb.Frame):
                     gio_str,
                     r.get('nhiem_vu_ncs') or '',
                     r.get('pp_day') or '', r.get('pp_hoc') or '',
-                    r.get('cdr_ma') or '', r.get('bai_danh_gia') or '')
+                    self.sec_parent.extract_codes(r.get('cdr_ma') or ''), r.get('bai_danh_gia') or '')
 
     def _fmt_num(self, val):
         if val is None or val == 0: return ''
@@ -717,7 +736,7 @@ class _NoiDungTab(tb.Frame):
                     'ten': str(row[0]),
                     'cap_do': 1,
                     'yeu_cau': str(row[6]) if len(row) > 6 and row[6] else '',
-                    'cdr_ma': str(row[7]) if len(row) > 7 and row[7] else '',
+                    'cdr_ma': self.sec_parent.extract_codes(str(row[7]) if len(row) > 7 and row[7] else ''),
                     'loai': 'thuong'
                 }
                 # Phân bổ giờ tùy theo tab LT hay TH

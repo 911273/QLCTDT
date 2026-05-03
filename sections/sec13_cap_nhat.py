@@ -159,6 +159,7 @@ class Sec13CapNhat(BaseSection):
                       for r in rows]
         self._refresh(self._rows)
         self.run_audit()
+        self._loading = False
 
     def run_audit(self):
         """Kiểm tra các lỗi phổ biến trong đề cương."""
@@ -186,7 +187,8 @@ class Sec13CapNhat(BaseSection):
         if not self._rows: issues.append("• Chưa có lịch sử cập nhật đề cương.")
         
         # 4. Kiểm tra trùng lặp hệ thống (Advanced Check)
-        dups = self.db.check_duplicates()
+        from repositories.hoc_phan_repository import HocPhanRepository
+        dups = HocPhanRepository(self.db).check_duplicates()
         if dups:
             issues.extend(dups)
         
